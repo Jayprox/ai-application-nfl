@@ -198,7 +198,10 @@ MAIN SCREEN LAYOUT (Player Detail):
 *(Order planned below — execution not started yet. Check items off as each
 is actually built, not as it's planned.)*
 
-- [ ] Schema / DB setup — provision Postgres + Redis on Railway, run `db/schema.sql`
+- [x] Schema / DB setup — provision Postgres + Redis on Railway, run `db/schema.sql`
+      *(Done: Railway project "chalk-that-nfl" created, Postgres + Redis
+      provisioned, backend-api/ingestion-worker services created with
+      DATABASE_URL/REDIS_URL wired, schema applied — all 14 tables confirmed live.)*
 - [ ] Seed data — one-time pull of real nflverse data (teams, players, a
       season of games/stats) loaded into Postgres; real data from day one,
       not mocks
