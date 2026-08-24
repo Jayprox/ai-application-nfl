@@ -339,6 +339,54 @@ CREATE INDEX idx_ingestion_runs_job_type_started ON ingestion_runs(job_type, sta
 --   WHERE job_type = :job_type AND status = 'success'
 --   ORDER BY finished_at DESC LIMIT 1;
 
+-- ---------------------------------------------------------------------
+-- Auth: users, refresh tokens, and agent API keys
+-- ---------------------------------------------------------------------
+-- Two separate credential systems hitting the same query API — see Phase 2
+-- auth discussion. Humans get a real login session (JWT access token +
+-- revocable refresh token); agents get one permanent API key with no
+-- session at all. Never store a raw token/key/password — only hashes.
+
+CREATE TABLE users (
+    user_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email             TEXT UNIQUE NOT NULL,
+    password_hash      TEXT NOT NULL,           -- bcrypt
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Refresh tokens are looked up far less often than access tokens are
+-- verified (access tokens are self-verifying JWTs, checked on every
+-- request without a DB hit at all — only a refresh needs to touch this
+-- table), so a plain Postgres table is fine here rather than Redis; it
+-- also makes "show me a user's active sessions" or "revoke this one
+-- session" a normal SQL query instead of a Redis scan.
+CREATE TABLE refresh_tokens (
+    token_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id            UUID NOT NULL REFERENCES users(user_id),
+    token_hash          TEXT NOT NULL,           -- sha256 of the actual refresh token, never the raw value
+    issued_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at           TIMESTAMPTZ NOT NULL,
+    revoked_at           TIMESTAMPTZ              -- set on logout, or on rotation (see auth middleware notes)
+);
+
+CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+
+-- One row per issued agent credential. No expiry by design (see Phase 2
+-- discussion) — a key is valid until explicitly revoked.
+CREATE TABLE api_keys (
+    key_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    label              TEXT NOT NULL,            -- e.g. 'Part 2 Projection Service'
+    key_hash            TEXT NOT NULL,             -- sha256 of the actual key, never the raw value
+    scopes              TEXT[] NOT NULL DEFAULT '{}', -- reserved for future use; MVP can leave empty/unused
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at           TIMESTAMPTZ,
+    last_used_at          TIMESTAMPTZ
+);
+
+CREATE INDEX idx_api_keys_hash ON api_keys(key_hash);
+
 -- =========================================================================
 -- Example: resolving a vendor-native id to our canonical player, then
 -- pulling a split (rushing yards, home vs away, in snow games):
