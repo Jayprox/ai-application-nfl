@@ -140,24 +140,54 @@ Sportsbook odds (deferred/backlog) — The Odds API Business tier ($99/mo)
 ## Phase 4 — UI/UX Plan
 *Wireframe before you write a component.*
 
-- [ ] **Screen inventory** — List every unique view/page
-- [ ] **Key user flows** — Walk through the 1–2 flows that matter most
-- [ ] **Component sketch** — Rough layout for the main screen (ASCII or Figma link)
+- [x] **Screen inventory** — List every unique view/page
+- [x] **Key user flows** — Walk through the 1–2 flows that matter most
+- [x] **Component sketch** — Rough layout for the main screen (ASCII or Figma link)
 
 ```
 SCREENS:
-  1.
-  2.
-  3.
+  1. Login (single test account for MVP, but a real screen/flow)
+  2. Team browse — list of all 32 teams
+  3. Team detail — roster + team-level records (home/away, situational splits)
+  4. Player search/browse — find a player by name/team/position
+  5. Player detail — season averages, last-5-game trends, career stats,
+     injury status, situational-split filters applied here
+  (Not a separate screen, but a state every relevant screen must handle
+   gracefully per MVP scope: offseason/preseason/bye-week/rookie-with-no-history)
 
 MAIN FLOW:
-  User lands on ___ → does ___ → sees ___
+  User lands on a player (via search, or drilling in from their team page)
+  → views their base stats → applies one or more situational-split
+  filters (home/away, weather, time slot) → sees the filtered numbers
+  with sample size shown alongside. This loop — stats plus a split, with
+  context on how much data backs it — is the actual differentiator, so
+  the main screen is designed around it.
 
+MAIN SCREEN LAYOUT (Player Detail):
+  +-------------------------------------------------------------+
+  | < Back to Team              [Injury: Questionable - Ankle]  |
+  |                                                               |
+  |  Patrick Mahomes                 QB  |  Kansas City Chiefs   |
+  +-------------------------------------------------------------+
+  | [Season Avg] [Last 5 Games] [Career] [Game Log]              |  <- scope tabs
+  +-------------------------------------------------------------+
+  | Splits:  [Home/Away v]  [Time Slot v]  [Weather v]  [Clear]  |  <- split filters
+  +-------------------------------------------------------------+
+  |                                                               |
+  |  Passing Yards        287.4        (8 games)                 |
+  |  Passing TDs            2.1        (8 games)                 |
+  |  Completions            24.3       (8 games)                 |
+  |  Interceptions           0.6       (8 games)                 |
+  |                                                               |
+  +-------------------------------------------------------------+
+  | Data synced 4m ago                                           |  <- freshness metadata
+  +-------------------------------------------------------------+
 
-MAIN SCREEN LAYOUT:
-  +---------------------------+
-  |                           |
-  +---------------------------+
+  Note: this layout is a direct visual of the System Design decisions —
+  scope tabs map to the query API's `scope` field, split dropdowns map to
+  its `splits` object, the "(8 games)" is the sample-size metadata, and
+  "synced 4m ago" comes from ingestion_runs via the freshness metadata.
+  Nothing here needs new backend work — it surfaces what's already designed.
 ```
 
 ---
