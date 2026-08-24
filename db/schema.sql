@@ -10,8 +10,19 @@
 --     filtered via games.game_slot / weather_condition / home-or-away.
 --     Redis is what makes repeated versions of these queries cheap; this
 --     schema stays honest to "no calculations, raw data only."
---   * player_id uses nflverse's gsis_id convention as a stable, free,
---     cross-source identifier.
+--   * players.player_id is a canonical id WE mint ourselves (UUID) — it is
+--     NOT nflverse's gsis_id or any other vendor's id. Every source,
+--     including nflverse, is cross-referenced to it via
+--     player_id_crosswalk. This decouples our player identity from any
+--     single data source's ID scheme (revised from an earlier draft that
+--     used nflverse's gsis_id directly as the primary key — see the
+--     Chadwick Bureau Register comparison from Phase 2 discussion, which
+--     uses this same pattern: an independent canonical id, with MLBAM /
+--     Retrosheet / Baseball-Reference / FanGraphs all as peer mappings).
+--   * teams.team_id is already self-minted (SERIAL), so it doesn't need
+--     the same crosswalk treatment — team matching across sources is a
+--     much lower-risk problem (32 stable entities, matched by
+--     abbreviation) than player matching.
 --   * Offense / defense / special-teams stats are split into separate
 --     tables rather than one wide mostly-null table, since full-roster
 --     depth (not just skill positions) is a core requirement. Revisit if
@@ -49,6 +60,8 @@ CREATE TYPE injury_report_status_enum AS ENUM (
 
 CREATE TYPE practice_status_enum AS ENUM ('full', 'limited', 'dnp');
 
+CREATE TYPE match_confidence_enum AS ENUM ('matched', 'manual_review');
+
 -- ---------------------------------------------------------------------
 -- Stadiums
 -- ---------------------------------------------------------------------
@@ -83,9 +96,12 @@ CREATE TABLE teams (
 -- ---------------------------------------------------------------------
 -- Players
 -- ---------------------------------------------------------------------
+-- player_id is minted by us (gen_random_uuid() is built into Postgres 13+
+-- core — no extension needed). It is intentionally NOT tied to nflverse
+-- or any other vendor's id scheme; see player_id_crosswalk below.
 
 CREATE TABLE players (
-    player_id           VARCHAR(20) PRIMARY KEY,   -- nflverse gsis_id
+    player_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     full_name           TEXT NOT NULL,
     first_name          TEXT,
     last_name           TEXT,
@@ -105,11 +121,30 @@ CREATE INDEX idx_players_current_team ON players(current_team_id);
 CREATE INDEX idx_players_position_group ON players(position_group);
 
 -- ---------------------------------------------------------------------
+-- Player id crosswalk
+-- ---------------------------------------------------------------------
+-- One table, forever — a new data source means new rows here (a new
+-- `source` value), never a new table and never a new column on players.
+-- nflverse is just another source in this table, on equal footing with
+-- BallDontLie / Highlightly / whatever comes next.
+
+CREATE TABLE player_id_crosswalk (
+    player_id           UUID NOT NULL REFERENCES players(player_id),
+    source               TEXT NOT NULL,          -- 'nflverse' | 'balldontlie' | 'highlightly' | ...
+    source_player_id      TEXT NOT NULL,           -- that source's own id, as a string
+    match_confidence       match_confidence_enum NOT NULL DEFAULT 'matched',
+    matched_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source, source_player_id)
+);
+
+CREATE INDEX idx_player_id_crosswalk_player ON player_id_crosswalk(player_id);
+
+-- ---------------------------------------------------------------------
 -- Games
 -- ---------------------------------------------------------------------
 
 CREATE TABLE games (
-    game_id                 VARCHAR(20) PRIMARY KEY,   -- e.g. '2026_01_KC_BUF'
+    game_id                 VARCHAR(20) PRIMARY KEY,   -- e.g. '2026_01_KC_BUF' (nflverse convention)
     season                  INT NOT NULL,
     week                    INT NOT NULL,
     game_type               game_type_enum NOT NULL DEFAULT 'regular',
@@ -166,7 +201,7 @@ CREATE INDEX idx_team_game_stats_team ON team_game_stats(team_id);
 
 CREATE TABLE player_offense_game_stats (
     game_id             VARCHAR(20) NOT NULL REFERENCES games(game_id),
-    player_id           VARCHAR(20) NOT NULL REFERENCES players(player_id),
+    player_id           UUID NOT NULL REFERENCES players(player_id),
     team_id             INT NOT NULL REFERENCES teams(team_id),
 
     -- passing
@@ -201,7 +236,7 @@ CREATE INDEX idx_player_offense_team ON player_offense_game_stats(team_id);
 
 CREATE TABLE player_defense_game_stats (
     game_id             VARCHAR(20) NOT NULL REFERENCES games(game_id),
-    player_id           VARCHAR(20) NOT NULL REFERENCES players(player_id),
+    player_id           UUID NOT NULL REFERENCES players(player_id),
     team_id             INT NOT NULL REFERENCES teams(team_id),
 
     tackles_solo         INT,
@@ -227,7 +262,7 @@ CREATE INDEX idx_player_defense_team ON player_defense_game_stats(team_id);
 
 CREATE TABLE player_special_teams_game_stats (
     game_id             VARCHAR(20) NOT NULL REFERENCES games(game_id),
-    player_id           VARCHAR(20) NOT NULL REFERENCES players(player_id),
+    player_id           UUID NOT NULL REFERENCES players(player_id),
     team_id             INT NOT NULL REFERENCES teams(team_id),
 
     fg_attempts          INT,
@@ -256,7 +291,7 @@ CREATE INDEX idx_player_st_team ON player_special_teams_game_stats(team_id);
 
 CREATE TABLE injury_reports (
     report_id           SERIAL PRIMARY KEY,
-    player_id           VARCHAR(20) NOT NULL REFERENCES players(player_id),
+    player_id           UUID NOT NULL REFERENCES players(player_id),
     team_id              INT NOT NULL REFERENCES teams(team_id),
     season               INT NOT NULL,
     week                 INT NOT NULL,
@@ -275,17 +310,21 @@ CREATE INDEX idx_injury_reports_player_week
     ON injury_reports(player_id, season, week, report_date DESC);
 
 -- =========================================================================
--- Example split query this schema is meant to make cheap/simple:
+-- Example: resolving a vendor-native id to our canonical player, then
+-- pulling a split (rushing yards, home vs away, in snow games):
 --
---   -- A player's rushing yards average at home vs away in snow games
+--   WITH resolved_player AS (
+--     SELECT player_id FROM player_id_crosswalk
+--     WHERE source = 'balldontlie' AND source_player_id = :vendor_player_id
+--   )
 --   SELECT g.weather_condition,
 --          (t.team_id = g.home_team_id) AS is_home,
 --          AVG(pos.rushing_yards) AS avg_rushing_yards,
 --          COUNT(*) AS sample_size
 --   FROM player_offense_game_stats pos
+--   JOIN resolved_player rp ON rp.player_id = pos.player_id
 --   JOIN games g ON g.game_id = pos.game_id
 --   JOIN teams t ON t.team_id = pos.team_id
---   WHERE pos.player_id = :player_id
---     AND g.season = :season
+--   WHERE g.season = :season
 --   GROUP BY g.weather_condition, is_home;
 -- =========================================================================
