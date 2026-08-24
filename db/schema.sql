@@ -309,6 +309,36 @@ CREATE TABLE injury_reports (
 CREATE INDEX idx_injury_reports_player_week
     ON injury_reports(player_id, season, week, report_date DESC);
 
+-- ---------------------------------------------------------------------
+-- Ingestion run log
+-- ---------------------------------------------------------------------
+-- Written by the ingestion worker (separate Railway service) on every job
+-- run. Two purposes: operational debugging when a source hiccups, and
+-- backing the query API's freshness metadata (`meta.freshness`) — a
+-- response can report "synced 4m ago" by reading the latest successful
+-- run for the relevant job_type rather than guessing from a cache TTL.
+
+CREATE TYPE ingestion_status_enum AS ENUM ('running', 'success', 'failed');
+
+CREATE TABLE ingestion_runs (
+    run_id               SERIAL PRIMARY KEY,
+    job_type             TEXT NOT NULL,     -- 'sync_roster' | 'sync_schedule' | 'sync_historical_stats' |
+                                             -- 'sync_forecast_weather' | 'sync_live_stats' | 'sync_injury_reports'
+    source               TEXT NOT NULL,      -- 'nflverse' | 'open-meteo' | 'balldontlie' | 'highlightly' | ...
+    started_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at            TIMESTAMPTZ,
+    status                ingestion_status_enum NOT NULL DEFAULT 'running',
+    records_processed       INT,
+    error_message           TEXT
+);
+
+CREATE INDEX idx_ingestion_runs_job_type_started ON ingestion_runs(job_type, started_at DESC);
+
+-- Freshness lookup this table exists to support:
+--   SELECT finished_at FROM ingestion_runs
+--   WHERE job_type = :job_type AND status = 'success'
+--   ORDER BY finished_at DESC LIMIT 1;
+
 -- =========================================================================
 -- Example: resolving a vendor-native id to our canonical player, then
 -- pulling a split (rushing yards, home vs away, in snow games):
