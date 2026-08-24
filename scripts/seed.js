@@ -18,7 +18,15 @@ const { parse } = require('csv-parse/sync');
 const SEASON = 2026;
 const ROSTER_URL = `https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_${SEASON}.csv`;
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// keepAlive sends periodic TCP keepalive packets so a proxy/router along the
+// path (e.g. Railway's public TCP proxy) doesn't silently drop the socket
+// mid-run — this is what caused "Connection terminated unexpectedly" on a
+// long sequence of round trips over the public connection string.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+});
 
 // ---------------------------------------------------------------------
 // Stadiums — hand-curated (stable reference data, ~30 entries since a few
@@ -103,8 +111,8 @@ const TEAMS = [
 
 const POSITION_GROUP = {
   offense: new Set(['QB', 'RB', 'FB', 'HB', 'WR', 'TE', 'T', 'G', 'C', 'OT', 'OG', 'OL']),
-  defense: new Set(['DE', 'DT', 'NT', 'LB', 'ILB', 'OLB', 'MLB', 'EDGE', 'CB', 'S', 'SS', 'FS', 'DB']),
-  special_teams: new Set(['K', 'P', 'LS']),
+  defense: new Set(['DE', 'DT', 'NT', 'DL', 'LB', 'ILB', 'OLB', 'MLB', 'EDGE', 'CB', 'S', 'SS', 'FS', 'DB', 'SAF', 'NB']),
+  special_teams: new Set(['K', 'P', 'LS', 'KR', 'PR']),
 };
 
 function positionGroupFor(position) {
@@ -173,33 +181,46 @@ function fetchCsv(url) {
   });
 }
 
+const ROSTER_BATCH_SIZE = 100;
+
 async function seedRoster(client, teamIdByAbbr) {
   console.log(`[seed] fetching roster: ${ROSTER_URL}`);
   const csvText = await fetchCsv(ROSTER_URL);
   const rows = parse(csvText, { columns: true, skip_empty_lines: true });
   console.log(`[seed] parsed ${rows.length} roster rows`);
 
-  let inserted = 0;
+  // nflverse roster columns include: gsis_id, full_name, first_name,
+  // last_name, position, team, birth_date, draft_year/round/pick,
+  // status — adjust these field names if nflverse's exact column naming
+  // has drifted since this was written.
+  const usable = [];
   let skippedNoTeam = 0;
-
   for (const row of rows) {
-    // nflverse roster columns include: gsis_id, full_name, first_name,
-    // last_name, position, team, birth_date, draft_year/round/pick,
-    // status — adjust these field names if nflverse's exact column
-    // naming has drifted since this was written.
     const teamId = teamIdByAbbr[row.team];
     if (!teamId) {
       skippedNoTeam++;
       continue; // e.g. free agents / retired players with no current team
     }
     if (!row.gsis_id) continue; // skip rows without a usable nflverse id
+    usable.push({ row, teamId });
+  }
 
-    const client_result = await client.query(
-      `INSERT INTO players (full_name, first_name, last_name, position, position_group,
-                             current_team_id, birth_date, draft_year, draft_round, draft_pick, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING player_id`,
-      [
+  // Batched (multi-row) inserts instead of one round trip per player —
+  // ~2,900 sequential round trips over a public proxy connection is slow
+  // and leaves a lot of time for a dropped connection to blow away all
+  // progress. This cuts it to ~30 round trips (2 queries per batch of 100).
+  let inserted = 0;
+  for (let i = 0; i < usable.length; i += ROSTER_BATCH_SIZE) {
+    const batch = usable.slice(i, i + ROSTER_BATCH_SIZE);
+
+    const playerValues = [];
+    const playerParams = [];
+    batch.forEach(({ row, teamId }, idx) => {
+      const p = idx * 11;
+      playerValues.push(
+        `($${p + 1},$${p + 2},$${p + 3},$${p + 4},$${p + 5},$${p + 6},$${p + 7},$${p + 8},$${p + 9},$${p + 10},$${p + 11})`
+      );
+      playerParams.push(
         row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim(),
         row.first_name || null,
         row.last_name || null,
@@ -210,19 +231,38 @@ async function seedRoster(client, teamIdByAbbr) {
         row.draft_year ? parseInt(row.draft_year, 10) : null,
         row.draft_round ? parseInt(row.draft_round, 10) : null,
         row.draft_pick ? parseInt(row.draft_pick, 10) : null,
-        row.status || 'active',
-      ]
+        row.status || 'active'
+      );
+    });
+
+    const { rows: playerRows } = await client.query(
+      `INSERT INTO players (full_name, first_name, last_name, position, position_group,
+                             current_team_id, birth_date, draft_year, draft_round, draft_pick, status)
+       VALUES ${playerValues.join(',')}
+       RETURNING player_id`,
+      playerParams
     );
-    const playerId = client_result.rows[0].player_id;
+    // A plain multi-row INSERT ... RETURNING (no ON CONFLICT) returns rows
+    // in the same order the VALUES were given, so playerRows[idx] lines up
+    // with batch[idx] — safe to zip together positionally.
+
+    const crosswalkValues = [];
+    const crosswalkParams = [];
+    batch.forEach(({ row }, idx) => {
+      const p = idx * 2;
+      crosswalkValues.push(`($${p + 1}, 'nflverse', $${p + 2}, 'matched')`);
+      crosswalkParams.push(playerRows[idx].player_id, row.gsis_id);
+    });
 
     await client.query(
       `INSERT INTO player_id_crosswalk (player_id, source, source_player_id, match_confidence)
-       VALUES ($1, 'nflverse', $2, 'matched')
+       VALUES ${crosswalkValues.join(',')}
        ON CONFLICT (source, source_player_id) DO NOTHING`,
-      [playerId, row.gsis_id]
+      crosswalkParams
     );
 
-    inserted++;
+    inserted += batch.length;
+    console.log(`[seed] ...${inserted}/${usable.length} players inserted`);
   }
 
   console.log(`[seed] inserted ${inserted} players (skipped ${skippedNoTeam} with no matching team — likely free agents/retired)`);

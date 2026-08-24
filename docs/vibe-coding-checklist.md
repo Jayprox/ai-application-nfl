@@ -202,9 +202,12 @@ is actually built, not as it's planned.)*
       *(Done: Railway project "chalk-that-nfl" created, Postgres + Redis
       provisioned, backend-api/ingestion-worker services created with
       DATABASE_URL/REDIS_URL wired, schema applied — all 14 tables confirmed live.)*
-- [ ] Seed data — one-time pull of real nflverse data (teams, players, a
-      season of games/stats) loaded into Postgres; real data from day one,
-      not mocks
+- [x] Seed data (scoped, pass 1) — `scripts/seed.js` seeds real nflverse
+      data: 30 stadiums, 32 teams, 2,752 current-season players + their
+      `player_id_crosswalk` rows. Ran clean against the live Railway
+      Postgres. Deliberately scoped down — historical games/box-score
+      stats are NOT loaded yet; that's a separate follow-up pass once
+      this is verified, not blocking Core API routes from starting.
 - [ ] Core API routes — auth (`/login`, `/refresh`, `/logout`) + the
       structured `POST /query` endpoint
 - [ ] Frontend scaffold — React routing + layout shell for all 5 screens
