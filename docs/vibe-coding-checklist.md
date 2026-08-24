@@ -195,13 +195,27 @@ MAIN SCREEN LAYOUT (Player Detail):
 ## Phase 5 — Build Order
 *Always: data → server → UI. Never build UI against mocks if you can help it.*
 
-- [ ] Schema / DB setup
-- [ ] Seed data (enough to test with)
-- [ ] Core API routes (CRUD + business logic)
-- [ ] Frontend scaffold (routing, layout shell)
-- [ ] Feature 1 wired end-to-end (real data)
-- [ ] Feature 2 wired end-to-end
-- [ ] Feature N...
+*(Order planned below — execution not started yet. Check items off as each
+is actually built, not as it's planned.)*
+
+- [ ] Schema / DB setup — provision Postgres + Redis on Railway, run `db/schema.sql`
+- [ ] Seed data — one-time pull of real nflverse data (teams, players, a
+      season of games/stats) loaded into Postgres; real data from day one,
+      not mocks
+- [ ] Core API routes — auth (`/login`, `/refresh`, `/logout`) + the
+      structured `POST /query` endpoint
+- [ ] Frontend scaffold — React routing + layout shell for all 5 screens
+- [ ] Feature 1: Team browse + team detail wired end-to-end (real data)
+- [ ] Feature 2: Player search/browse wired end-to-end
+- [ ] Feature 3: Player detail — base stats (season avg / last-5 / career
+      scope tabs) wired end-to-end
+- [ ] Feature 4: Situational split filters wired into player detail
+- [ ] Feature 5: Injury status wired into player records + UI badge
+- [ ] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
+      all screens
+- [ ] Ingestion worker automation — turn the one-time seed into the real
+      scheduled worker (fixed / proximity / game-window jobs)
+- [ ] Deploy — live on Railway with a real URL
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
