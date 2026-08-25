@@ -3,12 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "description": "Chalk That NFL — stats research app (Part 1 of the Chalk That platform)",
+  "main": "backend/server.js",
   "scripts": {
-    "seed": "node scripts/seed.js"
+    "start": "node backend/server.js",
+    "seed": "node scripts/seed.js",
+    "create-test-user": "node scripts/create-test-user.js"
   },
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
     "pg": "^8.12.0"
   }
 }

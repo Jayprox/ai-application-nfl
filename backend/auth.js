@@ -1,5 +1,5 @@
 /**
- * Chalk That NFL — Auth (design-stage skeleton)
+ * Chalk That NFL — Auth
  * =========================================================================
  * Two credential types, one API. Humans authenticate via a real login
  * session (short-lived JWT access token + revocable refresh token).
@@ -8,21 +8,27 @@
  * route actually uses — it doesn't care which credential type shows up,
  * it just attaches `req.user` or `req.service` accordingly.
  *
- * The JWT/hashing logic here is real (uses `jsonwebtoken`, `bcrypt`, and
- * Node's built-in `crypto`). The DB calls are stubbed with TODOs — no
- * Postgres client/pool exists yet; wire these against `users`,
- * `refresh_tokens`, and `api_keys` from schema.sql once it does.
+ * DB calls now hit real Postgres via db.js (previously stubbed TODOs
+ * during the design-stage pass — wired up once schema.sql was live and
+ * users/refresh_tokens/api_keys existed for real).
  * =========================================================================
  */
 
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const { query } = require('./db');
 
 const ACCESS_TOKEN_TTL = '15m';
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-const JWT_SECRET = process.env.JWT_SECRET; // TODO: set in Railway env vars, never commit
+const JWT_SECRET = process.env.JWT_SECRET; // set in Railway env vars (and local .env), never commit
 const API_KEY_PREFIX = 'ctnfl_live_'; // makes a leaked key easy to recognize/scan for, same idea as Stripe/GitHub token prefixes
+
+if (!JWT_SECRET) {
+  // Fail loudly at startup rather than silently signing tokens with
+  // `undefined` as the secret, which jsonwebtoken will otherwise accept.
+  console.error('[auth] JWT_SECRET is not set — see .env.example');
+}
 
 // ---------------------------------------------------------------------
 // Hashing helpers — passwords use bcrypt (slow by design, right tool for
@@ -67,16 +73,12 @@ function issueAccessToken(userId) {
 async function issueRefreshToken(userId) {
   const rawToken = generateRawToken();
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
-
-  // TODO: INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
-  //       VALUES ($1, $2, $3)
   await saveRefreshTokenHash(userId, hashToken(rawToken), expiresAt);
-
   return rawToken; // raw value only ever returned here — never stored, never logged
 }
 
 async function login(email, rawPassword) {
-  const user = await findUserByEmail(email); // TODO: SELECT * FROM users WHERE email = $1
+  const user = await findUserByEmail(email);
   if (!user) throw new AuthError('invalid credentials');
 
   const passwordOk = await verifyPassword(rawPassword, user.password_hash);
@@ -89,7 +91,7 @@ async function login(email, rawPassword) {
 
 async function refresh(rawRefreshToken) {
   const tokenHash = hashToken(rawRefreshToken);
-  const record = await findRefreshTokenByHash(tokenHash); // TODO: SELECT * FROM refresh_tokens WHERE token_hash = $1
+  const record = await findRefreshTokenByHash(tokenHash);
 
   if (!record || record.revoked_at || record.expires_at < new Date()) {
     // Presenting an unknown, already-revoked, or expired refresh token
@@ -98,7 +100,7 @@ async function refresh(rawRefreshToken) {
     throw new AuthError('invalid refresh token');
   }
 
-  await revokeRefreshToken(record.token_id); // TODO: UPDATE refresh_tokens SET revoked_at = now() WHERE token_id = $1
+  await revokeRefreshToken(record.token_id);
 
   const accessToken = issueAccessToken(record.user_id);
   const newRefreshToken = await issueRefreshToken(record.user_id); // rotation — old one is now dead either way
@@ -119,17 +121,16 @@ async function logout(rawRefreshToken) {
 
 async function createApiKey(label) {
   const rawKey = generateApiKey();
-  // TODO: INSERT INTO api_keys (label, key_hash) VALUES ($1, $2)
   await saveApiKeyHash(label, hashToken(rawKey));
   return rawKey; // shown once at creation time, same as any API key provider
 }
 
 async function verifyApiKey(rawKey) {
   const keyHash = hashToken(rawKey);
-  const record = await findApiKeyByHash(keyHash); // TODO: SELECT * FROM api_keys WHERE key_hash = $1
+  const record = await findApiKeyByHash(keyHash);
   if (!record || record.revoked_at) throw new AuthError('invalid api key');
 
-  touchApiKeyLastUsed(record.key_id); // TODO: fire-and-forget UPDATE api_keys SET last_used_at = now() WHERE key_id = $1
+  touchApiKeyLastUsed(record.key_id); // fire-and-forget, no need to block the request on this
   return { keyId: record.key_id, label: record.label, scopes: record.scopes };
 }
 
@@ -169,14 +170,43 @@ function isJwtShaped(token) {
 
 class AuthError extends Error {}
 
-// ---- DB-touching stubs (TODO: implement against Postgres) ----
-async function findUserByEmail(_email) { return null; }
-async function findRefreshTokenByHash(_hash) { return null; }
-async function saveRefreshTokenHash(_userId, _hash, _expiresAt) {}
-async function revokeRefreshToken(_tokenId) {}
-async function findApiKeyByHash(_hash) { return null; }
-async function saveApiKeyHash(_label, _hash) {}
-async function touchApiKeyLastUsed(_keyId) {}
+// ---- DB-touching implementations (real Postgres, via db.js) ----
+
+async function findUserByEmail(email) {
+  const { rows } = await query('SELECT * FROM users WHERE email = $1', [email]);
+  return rows[0] || null;
+}
+
+async function findRefreshTokenByHash(hash) {
+  const { rows } = await query('SELECT * FROM refresh_tokens WHERE token_hash = $1', [hash]);
+  return rows[0] || null;
+}
+
+async function saveRefreshTokenHash(userId, hash, expiresAt) {
+  await query(
+    'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+    [userId, hash, expiresAt]
+  );
+}
+
+async function revokeRefreshToken(tokenId) {
+  await query('UPDATE refresh_tokens SET revoked_at = now() WHERE token_id = $1', [tokenId]);
+}
+
+async function findApiKeyByHash(hash) {
+  const { rows } = await query('SELECT * FROM api_keys WHERE key_hash = $1', [hash]);
+  return rows[0] || null;
+}
+
+async function saveApiKeyHash(label, hash) {
+  await query('INSERT INTO api_keys (label, key_hash) VALUES ($1, $2)', [label, hash]);
+}
+
+async function touchApiKeyLastUsed(keyId) {
+  query('UPDATE api_keys SET last_used_at = now() WHERE key_id = $1', [keyId]).catch((err) =>
+    console.error('[auth] failed to touch api key last_used_at:', err.message)
+  );
+}
 
 module.exports = {
   hashPassword,
