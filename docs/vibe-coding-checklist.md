@@ -126,6 +126,9 @@ Sportsbook odds (deferred/backlog) — The Odds API Business tier ($99/mo)
   - Swift iOS app (web ships first; same API, no rework needed later)
   - Natural-language search bar (StatMuse-style query)
   - Part 2: the AI agent/projections service entirely
+  - Email verification for self-serve signup — auth is username/password
+    for v1, accounts created directly via `scripts/create-test-user.js`;
+    email is stored (optional) but unverified and unused for login
   - *(Not backlog, but still open: which live-stats vendor powers
     current-season data — BallDontLie vs. Highlightly, undecided)*
 - [x] **Success metric** — How will you know v1 is shippable?

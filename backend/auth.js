@@ -15,7 +15,7 @@
  */
 
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs'); // pure-JS, no native build step — see package.json note
 const crypto = require('crypto');
 const { query } = require('./db');
 
@@ -77,8 +77,8 @@ async function issueRefreshToken(userId) {
   return rawToken; // raw value only ever returned here — never stored, never logged
 }
 
-async function login(email, rawPassword) {
-  const user = await findUserByEmail(email);
+async function login(username, rawPassword) {
+  const user = await findUserByUsername(username);
   if (!user) throw new AuthError('invalid credentials');
 
   const passwordOk = await verifyPassword(rawPassword, user.password_hash);
@@ -172,8 +172,8 @@ class AuthError extends Error {}
 
 // ---- DB-touching implementations (real Postgres, via db.js) ----
 
-async function findUserByEmail(email) {
-  const { rows } = await query('SELECT * FROM users WHERE email = $1', [email]);
+async function findUserByUsername(username) {
+  const { rows } = await query('SELECT * FROM users WHERE username = $1', [username]);
   return rows[0] || null;
 }
 

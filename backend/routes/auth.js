@@ -1,7 +1,7 @@
 /**
  * Chalk That NFL — Auth routes
  * =========================================================================
- * POST /login    { email, password } -> { accessToken, refreshToken }
+ * POST /login    { username, password } -> { accessToken, refreshToken }
  * POST /refresh  { refreshToken }     -> { accessToken, refreshToken }
  * POST /logout   { refreshToken }     -> 204
  *
@@ -19,13 +19,13 @@ const { login, refresh, logout, AuthError } = require('../auth');
 const router = express.Router();
 
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'email and password are required' });
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username and password are required' });
   }
 
   try {
-    const tokens = await login(email, password);
+    const tokens = await login(username, password);
     res.json(tokens);
   } catch (err) {
     if (err instanceof AuthError) return res.status(401).json({ error: err.message });

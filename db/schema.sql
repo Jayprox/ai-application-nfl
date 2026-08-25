@@ -349,8 +349,11 @@ CREATE INDEX idx_ingestion_runs_job_type_started ON ingestion_runs(job_type, sta
 
 CREATE TABLE users (
     user_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email             TEXT UNIQUE NOT NULL,
-    password_hash      TEXT NOT NULL,           -- bcrypt
+    username          TEXT UNIQUE NOT NULL,
+    email             TEXT UNIQUE,              -- optional for now; email verification
+                                                  -- for self-serve signup is backlogged
+                                                  -- (see checklist Phase 3 backlog)
+    password_hash      TEXT NOT NULL,           -- bcrypt (via bcryptjs)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );

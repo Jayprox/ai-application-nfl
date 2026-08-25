@@ -1,10 +1,11 @@
 /**
- * Chalk That NFL — create the single MVP test account
+ * Chalk That NFL — create a test account (username/password login)
  * =========================================================================
- * Per checklist Phase 3 ("a single test account is acceptable for v1"),
- * there's no public signup route — this one-off script creates it
- * directly against Postgres. Run with:
- *   node scripts/create-test-user.js <email> <password>
+ * No public signup route yet — accounts are created directly against
+ * Postgres. Email is optional (nullable in the schema); it's not used for
+ * login and there's no verification flow yet (backlogged — see checklist
+ * Phase 3 backlog). Run with:
+ *   node scripts/create-test-user.js <username> <password> [email]
  * =========================================================================
  */
 
@@ -13,9 +14,9 @@ const { pool } = require('../db');
 const { hashPassword } = require('../auth');
 
 async function main() {
-  const [, , email, password] = process.argv;
-  if (!email || !password) {
-    console.error('Usage: node scripts/create-test-user.js <email> <password>');
+  const [, , username, password, email] = process.argv;
+  if (!username || !password) {
+    console.error('Usage: node scripts/create-test-user.js <username> <password> [email]');
     process.exit(1);
   }
   if (!process.env.DATABASE_URL) {
@@ -25,13 +26,16 @@ async function main() {
 
   const passwordHash = await hashPassword(password);
   const { rows } = await pool.query(
-    `INSERT INTO users (email, password_hash) VALUES ($1, $2)
-     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = now()
-     RETURNING user_id, email`,
-    [email, passwordHash]
+    `INSERT INTO users (username, password_hash, email) VALUES ($1, $2, $3)
+     ON CONFLICT (username) DO UPDATE
+       SET password_hash = EXCLUDED.password_hash,
+           email = COALESCE(EXCLUDED.email, users.email),
+           updated_at = now()
+     RETURNING user_id, username`,
+    [username, passwordHash, email || null]
   );
 
-  console.log(`[create-test-user] ready: ${rows[0].email} (user_id ${rows[0].user_id})`);
+  console.log(`[create-test-user] ready: ${rows[0].username} (user_id ${rows[0].user_id})`);
   await pool.end();
 }
 

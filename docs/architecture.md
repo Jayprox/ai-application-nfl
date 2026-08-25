@@ -122,3 +122,5 @@ The StatMuse-style search bar — designed conceptually now, not yet scaffolded 
 ## 6. Still open
 
 Current-season/live-stats vendor (BallDontLie vs. Highlightly) — parked, not blocking anything designed so far. Sportsbook odds/props integration — deferred past MVP entirely. The NL query layer above is designed but not yet scaffolded in code.
+
+**Auth note:** human login uses `username`/`password` (not email) — matches the existing Chalk That MLB app's convention. `email` is stored on `users` but is optional and unused for login; email verification for a future self-serve signup flow is backlogged (see checklist Phase 3 backlog). There's no signup route yet either way — accounts are created directly via `scripts/create-test-user.js`.
