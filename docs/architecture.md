@@ -107,6 +107,26 @@ graph TB
 
 ---
 
+## 4.5 API surface (as built)
+
+Live on `backend-api` (`backend/server.js` + `backend/routes/*.js`). Public routes need no credentials; everything else requires the `authenticate` middleware (JWT or API key — see §2/§3 auth).
+
+| Route | Auth | Purpose |
+|---|---|---|
+| `GET /health` | public | Confirms the service is up **and** can reach Postgres — used for Railway deploy checks and local debugging, not just a liveness ping. |
+| `POST /login` | public | `{ username, password }` → `{ accessToken, refreshToken }`. Username/password, not email — see auth note below. |
+| `POST /refresh` | public | `{ refreshToken }` → new token pair (rotation — old refresh token is revoked). |
+| `POST /logout` | public | `{ refreshToken }` → revokes it. |
+| `GET /teams` | protected | List all 32 teams + their stadium. Not originally in the Phase 2 route sketch — added during Core API routes build since it's trivial and Feature 1 (Team browse) needs it anyway. |
+| `GET /teams/:id` | protected | One team + its current roster. |
+| `GET /players` | protected | Search/list via `?name=`, `?team=`, `?position_group=`. Added alongside `/teams` for the same reason. |
+| `GET /players/:id` | protected | Player identity/bio + latest injury status. Deliberately excludes stats — those go through `/query`, not a duplicate code path, keeping "one query engine, multiple callers" (§2) honest. |
+| `POST /query` | protected | The shared query engine — `{ entity_type, entity_id, scope, season, splits }` → `{ data, meta: { sample_size, freshness } }`. `entity_type` is `player` or `team`; `scope` is `season` \| `last5` \| `career` \| `game_log`; `splits` supports `home_away`, `game_slot`, `weather_condition`. Implemented as plain filtered aggregation over the `*_game_stats` tables — no stored/derived numbers, matching §2's "no predictive calculations." Currently returns correct `sample_size: 0` empty results until the historical-data ingestion pass loads real game stats. |
+
+**Auth note:** human login uses `username`/`password` (not email) — matches the existing Chalk That MLB app's convention. `email` is stored on `users` but is optional and unused for login; email verification for a future self-serve signup flow is backlogged (see checklist Phase 3 backlog). There's no signup route yet either way — accounts are created directly via `scripts/create-test-user.js`.
+
+---
+
 ## 5. Natural-language query layer (fast-follow, not MVP)
 
 The StatMuse-style search bar — designed conceptually now, not yet scaffolded in code, since structured filters ship in MVP and this layers on after.
@@ -121,6 +141,4 @@ The StatMuse-style search bar — designed conceptually now, not yet scaffolded 
 
 ## 6. Still open
 
-Current-season/live-stats vendor (BallDontLie vs. Highlightly) — parked, not blocking anything designed so far. Sportsbook odds/props integration — deferred past MVP entirely. The NL query layer above is designed but not yet scaffolded in code.
-
-**Auth note:** human login uses `username`/`password` (not email) — matches the existing Chalk That MLB app's convention. `email` is stored on `users` but is optional and unused for login; email verification for a future self-serve signup flow is backlogged (see checklist Phase 3 backlog). There's no signup route yet either way — accounts are created directly via `scripts/create-test-user.js`.
+Current-season/live-stats vendor (BallDontLie vs. Highlightly) — parked, not blocking anything designed so far. Sportsbook odds/props integration — deferred past MVP entirely. The NL query layer above is designed but not yet scaffolded in code. Auth details (username-based login, email verification backlog) are covered in §4.5.
