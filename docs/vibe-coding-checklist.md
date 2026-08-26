@@ -219,24 +219,34 @@ is actually built, not as it's planned.)*
       and `/players` return real seeded data, `/query` correctly returns a
       graceful `sample_size: 0` empty state (expected — historical game
       stats aren't loaded yet).
-- [ ] Historical data backfill — `scripts/backfill-historical.js` loads 5
+- [x] Historical data backfill — `scripts/backfill-historical.js` loads 5
       completed seasons (2021-2025) of real games + player box-score stats
       (offense/defense/special-teams) from nflverse, plus the 2026
       schedule, and derives `team_game_stats` from the loaded player rows.
-      First run (`npm run backfill-historical -- 2021 2026`) surfaced a
-      real bug: nflverse's `games.csv` uses `'LA'` for the Rams while our
-      `teams` table uses `'LAR'`, which caused 112 Rams games to be
-      skipped, which in turn caused every season's player-stats load to
-      hit a foreign-key violation and roll back entirely (all 5 seasons,
-      zero rows). Root-caused via direct diff of `games.csv` against our
-      real team abbreviations, fixed with an alias-normalization step
-      (`LA` → `LAR`) applied everywhere an nflverse abbreviation is looked
-      up (also documented in `docs/architecture.md` §3 since
-      `ingestion-worker` will need the same fix later). A harmless cosmetic
-      logging bug (`games: inserted 105.6...` instead of a whole number)
-      was fixed at the same time. Script has been corrected but not yet
-      re-run against the live DB — re-run + verification is the remaining
-      step before checking this off.
+      *(Done: first run surfaced a real bug — nflverse's `games.csv` uses
+      `'LA'` for the Rams while our `teams` table uses `'LAR'`, which
+      caused 112 Rams games to be skipped, which cascaded into a
+      foreign-key violation that rolled back every season's player-stats
+      load entirely (all 5 seasons, zero rows). Root-caused via direct
+      diff of `games.csv` against our real team abbreviations, fixed with
+      an alias-normalization step (`LA` → `LAR`) applied everywhere an
+      nflverse abbreviation is looked up (also documented in
+      `docs/architecture.md` §3 since `ingestion-worker` will need the
+      same fix later). A `scripts/cleanup-before-rerun.js` one-off was
+      added to clear the `team_game_stats` rows the failed run had already
+      inserted with null derived stats, since a re-run's `ON CONFLICT DO
+      NOTHING` wouldn't have replaced them. Re-run after both fixes:
+      1,696 games inserted (0 skipped), all 5 seasons of player stats
+      loaded clean (no rollbacks — ~5,600-5,700 offense / ~9,700-10,100
+      defense / ~1,300-1,700 special-teams rows per season), 3,392
+      team_game_stats rows (1,696 games × 2 teams, no gaps). Verified
+      end-to-end via `POST /query` for Patrick Mahomes' 2024 season —
+      real, correct numbers (242.5 pass yds/gm, 23.5/34.9 completions,
+      1.63 TDs, 0.68 INTs across 19 games) instead of the earlier
+      `sample_size: 0` empty state. Note: `meta.freshness.synced_at`
+      correctly returns `null` for this data — the one-time backfill
+      script doesn't write to `ingestion_runs`; that starts once
+      "Ingestion worker automation" (below) exists.)*
 - [ ] Frontend scaffold — React routing + layout shell for all 5 screens
 - [ ] Feature 1: Team browse + team detail wired end-to-end (real data)
 - [ ] Feature 2: Player search/browse wired end-to-end
