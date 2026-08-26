@@ -10,8 +10,8 @@
  */
 
 require('dotenv').config();
-const { pool } = require('../db');
-const { hashPassword } = require('../auth');
+const { pool } = require('../backend/db');
+const { hashPassword } = require('../backend/auth');
 
 async function main() {
   const [, , username, password, email] = process.argv;

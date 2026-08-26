@@ -101,9 +101,9 @@ graph TB
 
 | Service | Needs |
 |---|---|
-| `backend-api` | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET` |
+| `backend-api` | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `CORS_ORIGIN` (the deployed React web URL, once it has one) |
 | `ingestion-worker` | `DATABASE_URL`, `REDIS_URL`, `OPEN_METEO_API_KEY`, `LIVE_STATS_VENDOR_API_KEY` (once chosen) |
-| React web | `BACKEND_API_URL` (build-time) |
+| React web | `VITE_API_URL` (build-time — Vite only exposes `VITE_`-prefixed vars to client code) |
 
 `JWT_SECRET` only ever needs to exist on `backend-api` — it's the only service verifying tokens; `ingestion-worker` never authenticates incoming requests, so it never needs it.
 
@@ -126,6 +126,22 @@ Live on `backend-api` (`backend/server.js` + `backend/routes/*.js`). Public rout
 | `POST /query` | protected | The shared query engine — `{ entity_type, entity_id, scope, season, splits }` → `{ data, meta: { sample_size, freshness } }`. `entity_type` is `player` or `team`; `scope` is `season` \| `last5` \| `career` \| `game_log`; `splits` supports `home_away`, `game_slot`, `weather_condition`. Implemented as plain filtered aggregation over the `*_game_stats` tables — no stored/derived numbers, matching §2's "no predictive calculations." Currently returns correct `sample_size: 0` empty results until the historical-data ingestion pass loads real game stats. |
 
 **Auth note:** human login uses `username`/`password` (not email) — matches the existing Chalk That MLB app's convention. `email` is stored on `users` but is optional and unused for login; email verification for a future self-serve signup flow is backlogged (see checklist Phase 3 backlog). There's no signup route yet either way — accounts are created directly via `scripts/create-test-user.js`.
+
+**CORS.** `backend-api` is now called cross-origin by a real browser client, so `cors` is configured explicitly (`server.js`) against a `CORS_ORIGIN` env var — one allowed origin (or comma-separated list), never a wildcard `'*'`, since a JWT-authenticated API shouldn't accept requests from an arbitrary origin. Defaults to the local Vite dev server (`http://localhost:5173`) when unset; set to the real deployed frontend URL once React web has a Railway domain.
+
+---
+
+## 4.6 Frontend (as built)
+
+`frontend/` — a separate Vite project (not a Railway service yet; see Phase 5 "Deploy"), matching the 5-screen inventory from the checklist's Phase 4 exactly.
+
+**Stack:** React (JavaScript, not TypeScript — chosen to match the plain-JS backend rather than mixing languages across the stack) + [Vite](https://vite.dev) + Tailwind CSS v4 (via `@tailwindcss/vite`, no separate PostCSS config needed) + `react-router-dom` v7 for client-side routing.
+
+**Routing (`src/App.jsx`):** `/login` is the only public route. Every other route sits behind a `ProtectedRoute` (redirects to `/login` if not authenticated, preserving the original destination to return to after login) wrapped in a shared `Layout` (nav shell — matches §2's "one shared query engine, multiple clients" spirit: one layout, one auth gate, all screens sit inside it). Routes: `/teams`, `/teams/:teamId`, `/players`, `/players/:playerId`.
+
+**Auth on the client (`src/context/AuthContext.jsx`, `src/api/client.js`, `src/api/tokenStorage.js`):** access + refresh tokens are stored in `localStorage`. All API calls go through one `apiFetch()` wrapper (never raw `fetch()`) so token attachment, error shapes, and refresh are handled in exactly one place. On a `401` (access token expired — 15 min lifetime, see `backend/auth.js`), `apiFetch` transparently calls `POST /refresh` once and retries the original request; concurrent 401s from multiple in-flight requests share a single refresh call rather than racing. If the refresh itself fails, an `AuthError` is thrown and the caller drops back to `/login`.
+
+**What's scaffolded vs. wired:** `LoginPage` is real, calling `POST /login` end-to-end (it's the auth gate, not a "feature," so it wasn't deferred). `TeamBrowsePage`/`TeamDetailPage`/`PlayerBrowsePage`/`PlayerDetailPage` are routed layout shells only — no data fetching yet. That's deliberate: wiring them to real data via `GET /teams`, `GET /players`, and `POST /query` is Features 1–5 in the Phase 5 build order, kept as separate checklist items rather than done all at once here.
 
 ---
 

@@ -247,7 +247,18 @@ is actually built, not as it's planned.)*
       correctly returns `null` for this data — the one-time backfill
       script doesn't write to `ingestion_runs`; that starts once
       "Ingestion worker automation" (below) exists.)*
-- [ ] Frontend scaffold — React routing + layout shell for all 5 screens
+- [x] Frontend scaffold — React routing + layout shell for all 5 screens.
+      *(Done: `frontend/` — Vite + React (JS) + Tailwind CSS v4 +
+      react-router-dom v7. Routes for all 5 screens (`/login`, `/teams`,
+      `/teams/:teamId`, `/players`, `/players/:playerId`), gated by a
+      `ProtectedRoute` + shared nav `Layout`. Login is wired real
+      end-to-end against `POST /login` (with token storage + transparent
+      refresh-on-401 via a single shared `apiFetch` wrapper — not a mock);
+      the other 4 screens are routed shells pending Features 1-5. Required
+      adding `cors` to the backend (`server.js`, `CORS_ORIGIN` env var) so
+      the browser can call the API cross-origin — documented in
+      `docs/architecture.md` §4.5/§4.6. `npm run build`, lint, and
+      `npm audit` all clean (0 vulnerabilities).)*
 - [ ] Feature 1: Team browse + team detail wired end-to-end (real data)
 - [ ] Feature 2: Player search/browse wired end-to-end
 - [ ] Feature 3: Player detail — base stats (season avg / last-5 / career

@@ -9,6 +9,7 @@
 
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { pool } = require('./db');
 const { authenticate } = require('./auth');
 
@@ -19,6 +20,21 @@ const queryRoutes = require('./routes/query');
 
 const app = express();
 app.use(express.json());
+
+// The React web app (and Swift iOS later) is now a real browser client
+// hitting this API cross-origin, so CORS needs to be explicit rather than
+// left to the browser's default same-origin block. CORS_ORIGIN is a single
+// allowed origin (comma-separated list also supported) so each environment
+// — local dev, the deployed Railway frontend — sets its own value rather
+// than this defaulting open to '*'.
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim());
+app.use(
+  cors({
+    origin: allowedOrigins,
+  })
+);
 
 // Public: no credentials required. /health exists specifically so a
 // Railway deploy (or anyone debugging locally) can confirm the service is
