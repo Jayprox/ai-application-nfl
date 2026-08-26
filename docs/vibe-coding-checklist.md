@@ -259,7 +259,17 @@ is actually built, not as it's planned.)*
       the browser can call the API cross-origin — documented in
       `docs/architecture.md` §4.5/§4.6. `npm run build`, lint, and
       `npm audit` all clean (0 vulnerabilities).)*
-- [ ] Feature 1: Team browse + team detail wired end-to-end (real data)
+- [x] Feature 1: Team browse + team detail wired end-to-end (real data).
+      *(Done: `TeamBrowsePage` fetches `GET /teams` and groups all 32 teams
+      by conference/division; `TeamDetailPage` fetches `GET /teams/:id`
+      and shows stadium info plus the current roster grouped by position
+      group (offense/defense/special-teams), each player linking to
+      `/players/:id`. Added a shared `useApiFetch` hook (loading/error
+      state + auto-redirect to `/login` on a failed session, used by every
+      data-backed screen from here on) and a shared `AsyncState` component
+      for loading/error UI, so Features 2-5 reuse the same pattern rather
+      than each re-implementing it. `npm run build`, lint, and `npm audit`
+      all clean.)*
 - [ ] Feature 2: Player search/browse wired end-to-end
 - [ ] Feature 3: Player detail — base stats (season avg / last-5 / career
       scope tabs) wired end-to-end
