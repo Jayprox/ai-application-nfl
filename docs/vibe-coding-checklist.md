@@ -211,8 +211,32 @@ is actually built, not as it's planned.)*
       Postgres. Deliberately scoped down — historical games/box-score
       stats are NOT loaded yet; that's a separate follow-up pass once
       this is verified, not blocking Core API routes from starting.
-- [ ] Core API routes — auth (`/login`, `/refresh`, `/logout`) + the
-      structured `POST /query` endpoint
+- [x] Core API routes — real Postgres-backed `/login`/`/refresh`/`/logout`
+      (username/password), `POST /query` (the shared query engine — season/
+      last5/career/game_log scope, home/away + weather + time-slot splits),
+      plus `GET /teams`, `GET /players`, and `/health`. Verified end-to-end
+      against the live Railway deploy: login issues real tokens, `/teams`
+      and `/players` return real seeded data, `/query` correctly returns a
+      graceful `sample_size: 0` empty state (expected — historical game
+      stats aren't loaded yet).
+- [ ] Historical data backfill — `scripts/backfill-historical.js` loads 5
+      completed seasons (2021-2025) of real games + player box-score stats
+      (offense/defense/special-teams) from nflverse, plus the 2026
+      schedule, and derives `team_game_stats` from the loaded player rows.
+      First run (`npm run backfill-historical -- 2021 2026`) surfaced a
+      real bug: nflverse's `games.csv` uses `'LA'` for the Rams while our
+      `teams` table uses `'LAR'`, which caused 112 Rams games to be
+      skipped, which in turn caused every season's player-stats load to
+      hit a foreign-key violation and roll back entirely (all 5 seasons,
+      zero rows). Root-caused via direct diff of `games.csv` against our
+      real team abbreviations, fixed with an alias-normalization step
+      (`LA` → `LAR`) applied everywhere an nflverse abbreviation is looked
+      up (also documented in `docs/architecture.md` §3 since
+      `ingestion-worker` will need the same fix later). A harmless cosmetic
+      logging bug (`games: inserted 105.6...` instead of a whole number)
+      was fixed at the same time. Script has been corrected but not yet
+      re-run against the live DB — re-run + verification is the remaining
+      step before checking this off.
 - [ ] Frontend scaffold — React routing + layout shell for all 5 screens
 - [ ] Feature 1: Team browse + team detail wired end-to-end (real data)
 - [ ] Feature 2: Player search/browse wired end-to-end

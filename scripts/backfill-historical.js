@@ -56,6 +56,21 @@ const playerStatsUrl = (season) =>
 
 const BATCH_SIZE = 100;
 
+// nflverse's games.csv (and its other data files — player stats, rosters)
+// use 'LA' for the Los Angeles Rams; our own teams table (scripts/seed.js)
+// uses 'LAR'. Confirmed by diffing games.csv's home_team/away_team values
+// for 2021-2026 against our 32 real team abbreviations — 'LA' was the only
+// mismatch found. This one mismatch was the root cause of 112 Rams games
+// being skipped during loadGames() on the first run, which cascaded into
+// player_defense_game_stats_game_id_fkey violations (and a full per-season
+// rollback) in the player-stats loader downstream, since the player-stats
+// CSVs still reference those game_ids. Applied everywhere an nflverse team
+// abbreviation is looked up against our teamIdByAbbr/stadiumIdByAbbr maps.
+const TEAM_ABBR_ALIASES = { LA: 'LAR' };
+function normalizeAbbr(abbr) {
+  return TEAM_ABBR_ALIASES[abbr] || abbr;
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   keepAlive: true,
@@ -148,12 +163,12 @@ async function loadGames(client, startSeason, endSeason, teamIdByAbbr, stadiumId
     const params = [];
 
     for (const g of batch) {
-      const homeTeamId = teamIdByAbbr[g.home_team];
-      const awayTeamId = teamIdByAbbr[g.away_team];
+      const homeTeamId = teamIdByAbbr[normalizeAbbr(g.home_team)];
+      const awayTeamId = teamIdByAbbr[normalizeAbbr(g.away_team)];
       // Home team's stadium is our source of truth for stadium_id (teams
       // table already has one) rather than trying to match games.csv's
       // free-text stadium name.
-      const stadiumId = stadiumIdByAbbr[g.home_team];
+      const stadiumId = stadiumIdByAbbr[normalizeAbbr(g.home_team)];
       if (!homeTeamId || !awayTeamId || !stadiumId) {
         skipped++;
         continue;
@@ -202,7 +217,7 @@ async function loadGames(client, startSeason, endSeason, teamIdByAbbr, stadiumId
          ON CONFLICT (game_id) DO NOTHING`,
         params
       );
-      inserted += values.length / 15;
+      inserted += values.length;
     }
     if (i % 500 === 0) console.log(`[backfill] ...games ${Math.min(i + BATCH_SIZE, inRange.length)}/${inRange.length}`);
   }
@@ -258,7 +273,7 @@ async function loadPlayerStatsForSeason(client, season, playerIdByGsis, teamIdBy
 
   for (const row of rows) {
     const playerId = playerIdByGsis[row.player_id];
-    const teamId = teamIdByAbbr[row.team];
+    const teamId = teamIdByAbbr[normalizeAbbr(row.team)];
     if (!playerId || !teamId || !row.game_id) {
       skippedNoPlayer++;
       continue;
@@ -407,7 +422,7 @@ async function backfillRostersForSeasons(client, startSeason, endSeason, teamIdB
       batch.forEach((row, idx) => {
         const p = idx * 11;
         playerValues.push(`($${p+1},$${p+2},$${p+3},$${p+4},$${p+5},$${p+6},$${p+7},$${p+8},$${p+9},$${p+10},$${p+11})`);
-        const teamId = teamIdByAbbr[row.team] || null;
+        const teamId = teamIdByAbbr[normalizeAbbr(row.team)] || null;
         playerParams.push(
           row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim(),
           row.first_name || null,
