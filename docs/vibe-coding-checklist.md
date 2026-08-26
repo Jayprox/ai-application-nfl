@@ -280,8 +280,24 @@ is actually built, not as it's planned.)*
       `constants/playerStatus.js` so the position-group labels and status
       badge styling are shared with Team detail (Feature 1) instead of
       duplicated. `npm run build`, lint, and `npm audit` all clean.)*
-- [ ] Feature 3: Player detail — base stats (season avg / last-5 / career
-      scope tabs) wired end-to-end
+- [x] Feature 3: Player detail — base stats (season avg / last-5 / career
+      scope tabs) wired end-to-end.
+      *(Done: `PlayerDetailPage` — the app's main screen per the Phase 4
+      component sketch — has real scope tabs (Season Avg / Last 5 Games /
+      Career / Game Log) and a season selector, all wired to `POST
+      /query`. Stat columns are position-group-aware (offense/defense/
+      special-teams, via `constants/statColumns.js`, mirroring the
+      backend's own `PLAYER_STAT_COLUMNS`). Game Log renders a real table
+      with opponent parsed from `game_id` (no extra request needed — see
+      the `SEASON_WEEK_AWAY_HOME` format from the historical backfill).
+      Shows sample size + freshness (`meta.freshness.synced_at` correctly
+      reads "not yet synced" — `ingestion_runs` isn't populated until
+      Ingestion worker automation exists). Added a `useStatsQuery` hook
+      (POST counterpart to `useApiFetch`, same loading/error/session
+      handling) so future `/query`-backed screens don't reinvent this.
+      Split filters (Feature 4) and the injury badge (Feature 5) are
+      deliberately not here yet. `npm run build`, lint, and `npm audit`
+      all clean.)*
 - [ ] Feature 4: Situational split filters wired into player detail
 - [ ] Feature 5: Injury status wired into player records + UI badge
 - [ ] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
