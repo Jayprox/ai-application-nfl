@@ -270,7 +270,16 @@ is actually built, not as it's planned.)*
       for loading/error UI, so Features 2-5 reuse the same pattern rather
       than each re-implementing it. `npm run build`, lint, and `npm audit`
       all clean.)*
-- [ ] Feature 2: Player search/browse wired end-to-end
+- [x] Feature 2: Player search/browse wired end-to-end.
+      *(Done: `PlayerBrowsePage` fetches `GET /players` with live
+      `?name=` (debounced 300ms), `?team=` (dropdown populated from
+      `GET /teams`), and `?position_group=` filters — any combination,
+      updating the result list as you type/select. Shows a "showing first
+      100" notice when the backend's result cap is hit rather than
+      silently truncating. Extracted `constants/positionGroups.js` and
+      `constants/playerStatus.js` so the position-group labels and status
+      badge styling are shared with Team detail (Feature 1) instead of
+      duplicated. `npm run build`, lint, and `npm audit` all clean.)*
 - [ ] Feature 3: Player detail — base stats (season avg / last-5 / career
       scope tabs) wired end-to-end
 - [ ] Feature 4: Situational split filters wired into player detail

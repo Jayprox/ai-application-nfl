@@ -1,23 +1,11 @@
 import { Link, useParams } from 'react-router-dom';
 import { useApiFetch } from '../hooks/useApiFetch';
 import AsyncState from '../components/AsyncState';
+import { POSITION_GROUP_ORDER, POSITION_GROUP_LABEL } from '../constants/positionGroups';
+import { statusBadgeClass, statusLabel } from '../constants/playerStatus';
 
 // Phase 4 screen 3 / Phase 5 Feature 1 — wired to real data via
 // GET /teams/:id (team + current roster).
-
-const POSITION_GROUP_LABEL = {
-  offense: 'Offense',
-  defense: 'Defense',
-  special_teams: 'Special Teams',
-};
-
-const STATUS_STYLE = {
-  active: 'text-emerald-700 bg-emerald-50',
-  injured_reserve: 'text-amber-700 bg-amber-50',
-  practice_squad: 'text-slate-500 bg-slate-100',
-  free_agent: 'text-slate-500 bg-slate-100',
-  retired: 'text-slate-400 bg-slate-100',
-};
 
 export default function TeamDetailPage() {
   const { teamId } = useParams();
@@ -59,7 +47,7 @@ export default function TeamDetailPage() {
         <p className="text-sm text-slate-500">No roster on file for this team.</p>
       ) : (
         <div className="space-y-6">
-          {['offense', 'defense', 'special_teams'].map((group) =>
+          {POSITION_GROUP_ORDER.map((group) =>
             rosterByGroup[group] ? (
               <div key={group}>
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
@@ -77,11 +65,11 @@ export default function TeamDetailPage() {
                           <span className="text-xs text-slate-400">{player.position}</span>
                           {player.status !== 'active' && (
                             <span
-                              className={`text-xs font-medium rounded px-1.5 py-0.5 ${
-                                STATUS_STYLE[player.status] ?? 'text-slate-500 bg-slate-100'
-                              }`}
+                              className={`text-xs font-medium rounded px-1.5 py-0.5 ${statusBadgeClass(
+                                player.status
+                              )}`}
                             >
-                              {player.status.replace('_', ' ')}
+                              {statusLabel(player.status)}
                             </span>
                           )}
                         </span>
