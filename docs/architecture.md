@@ -2,6 +2,14 @@
 
 This document captures the System Design decisions made for **Chalk That NFL**, the first app in the Chalk That platform. It's split so future sport-apps (NBA, MLB, a revived WNBA) can reuse the parts that are genuinely platform-level, while knowing which parts are NFL-specific choices to be re-decided per sport.
 
+> **Starting a new sport-app?** Don't read this whole file — use
+> `PLATFORM.md` at the repo root instead. It's the sport-agnostic parts of
+> this doc (§2 below, plus the reusable pieces of §4/§4.6/§4.7) extracted
+> into a single drop-in doc meant to be pasted straight into a new app's
+> chat. This file stays NFL's own record — platform patterns plus NFL's
+> specific decisions, kept in sync with `PLATFORM.md` when a platform-level
+> pattern changes.
+
 ---
 
 ## 1. Platform vision
