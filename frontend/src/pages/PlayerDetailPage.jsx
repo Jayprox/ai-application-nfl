@@ -3,14 +3,14 @@ import { Link, useParams } from 'react-router-dom';
 import { useApiFetch } from '../hooks/useApiFetch';
 import { useStatsQuery } from '../hooks/useStatsQuery';
 import AsyncState from '../components/AsyncState';
+import InjuryBadge from '../components/InjuryBadge';
 import { STAT_COLUMNS_BY_POSITION_GROUP } from '../constants/statColumns';
 import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 
-// Phase 4 screen 5 (the app's main screen) / Phase 5 Feature 3 + 4 — scope
-// tabs (season/last5/career/game log) plus situational split filters
-// (home/away, time slot, weather), both wired to POST /query. The injury
-// badge (Feature 5) is deliberately not here yet — kept as its own
-// checklist item.
+// Phase 4 screen 5 (the app's main screen) / Phase 5 Features 3-5 — scope
+// tabs (season/last5/career/game log), situational split filters
+// (home/away, time slot, weather), and the injury badge, all wired to
+// real data (POST /query and GET /players/:id's current_injury).
 
 const selectClass =
   'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
@@ -99,12 +99,15 @@ export default function PlayerDetailPage() {
 
   return (
     <div>
-      <Link
-        to={player.team_id ? `/teams/${player.team_id}` : '/players'}
-        className="text-sm text-slate-500 hover:text-slate-900"
-      >
-        &larr; Back to {player.team_id ? player.team_name : 'Players'}
-      </Link>
+      <div className="flex items-start justify-between gap-4">
+        <Link
+          to={player.team_id ? `/teams/${player.team_id}` : '/players'}
+          className="text-sm text-slate-500 hover:text-slate-900"
+        >
+          &larr; Back to {player.team_id ? player.team_name : 'Players'}
+        </Link>
+        <InjuryBadge injury={player.current_injury} />
+      </div>
 
       <div className="mt-2 mb-6">
         <h1 className="text-xl font-semibold text-slate-900">{player.full_name}</h1>

@@ -312,7 +312,21 @@ is actually built, not as it's planned.)*
       never actually populated until a future weather-API ingestion pass
       (see `docs/architecture.md` §3). Not a bug. `npm run build`, lint,
       and `npm audit` all clean.)*
-- [ ] Feature 5: Injury status wired into player records + UI badge
+- [x] Feature 5: Injury status wired into player records + UI badge.
+      *(Done: added an `InjuryBadge` component rendering the Phase 4
+      mockup's "[Injury: Questionable - Ankle]" badge next to the back
+      link on `PlayerDetailPage`, sourced from `GET /players/:id`'s
+      existing `current_injury` field (no backend change needed — that
+      route already returned it, unused until now). Renders nothing for a
+      healthy player rather than an empty placeholder. Known, honest gap:
+      `injury_reports` isn't populated by either `scripts/seed.js` or
+      `scripts/backfill-historical.js` — nflverse's historical pass covers
+      games/box-scores, not injury reports, and a live injury feed is
+      still an open decision (`docs/architecture.md` §3, current-season
+      vendor undecided) — so no player will actually show a badge until
+      that source exists. Not a bug; documented in `InjuryBadge.jsx`
+      itself so it isn't mistaken for one later. `npm run build`, lint,
+      and `npm audit` all clean.)*
 - [ ] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
       all screens
 - [ ] Ingestion worker automation — turn the one-time seed into the real
