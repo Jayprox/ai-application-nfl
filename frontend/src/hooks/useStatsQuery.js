@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, AuthError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -43,26 +43,52 @@ export function useStatsQuery(body) {
   const [fetchedKey, setFetchedKey] = useState(null);
   const isStale = bodyKey !== fetchedKey;
 
+  // A second, related bug the above alone doesn't cover: switching scope
+  // tabs *quickly* (e.g. clicking through all four before the first
+  // request returns) fires several overlapping POST /query calls with no
+  // cancellation. Network responses can arrive out of order — if an
+  // OLDER request's response lands after a NEWER one's, the old response
+  // would call setFetchedKey/setData last and win, permanently
+  // overwriting the correct current data with a stale result (and, since
+  // nothing would trigger another refetch until the user changes
+  // something again, the UI could get stuck showing "Loading stats…"
+  // forever, or worse, silently show the wrong scope's numbers). This ref
+  // always holds the bodyKey belonging to the MOST RECENTLY STARTED
+  // request; a response is only applied if it's still that request by
+  // the time it resolves. The assignment happens in a (no-dependency-array,
+  // runs-after-every-render) effect rather than directly in the render
+  // body — mutating a ref during render itself is unsafe under React's
+  // concurrent rendering (a render can be started speculatively and
+  // discarded), so the write, like the read inside refetch(), stays
+  // strictly outside the render phase.
+  const latestBodyKeyRef = useRef(bodyKey);
+  useEffect(() => {
+    latestBodyKeyRef.current = bodyKey;
+  });
+
   const { logout } = useAuth();
   const navigate = useNavigate();
 
   const refetch = useCallback(async () => {
     if (!body) return;
+    const requestKey = bodyKey;
     setLoading(true);
     setError(null);
     try {
       const result = await apiFetch('/query', { method: 'POST', body });
-      setFetchedKey(bodyKey);
+      if (latestBodyKeyRef.current !== requestKey) return; // superseded by a newer request — ignore this stale response
+      setFetchedKey(requestKey);
       setData(result);
+      setLoading(false);
     } catch (err) {
       if (err instanceof AuthError) {
         await logout();
         navigate('/login', { replace: true });
         return;
       }
-      setFetchedKey(bodyKey);
+      if (latestBodyKeyRef.current !== requestKey) return;
+      setFetchedKey(requestKey);
       setError(err.message || 'Something went wrong');
-    } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bodyKey is the real dependency; body itself is captured fresh whenever bodyKey changes

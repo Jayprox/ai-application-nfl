@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, AuthError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -34,26 +34,49 @@ export function useApiFetch(path) {
   const [fetchedKey, setFetchedKey] = useState(null);
   const isStale = path !== fetchedKey;
 
+  // A second, related bug: changing filters quickly (e.g. Player Browse's
+  // team/position dropdowns, which — unlike the name search box — aren't
+  // debounced) fires overlapping GET requests with no cancellation. If an
+  // OLDER request's response arrives after a NEWER one's, it would win
+  // and overwrite the correct current result — worst case leaving the UI
+  // stuck showing stale or "Loading…" state forever, since nothing
+  // triggers another refetch until the user changes something again. This
+  // ref always holds the `path` belonging to the MOST RECENTLY STARTED
+  // request; a response is only applied if it's still that request by the
+  // time it resolves. The assignment happens in a (no-dependency-array,
+  // runs-after-every-render) effect rather than directly in the render
+  // body — mutating a ref during render itself is unsafe under React's
+  // concurrent rendering (a render can be started speculatively and
+  // discarded), so the write, like the read inside refetch(), stays
+  // strictly outside the render phase.
+  const latestPathRef = useRef(path);
+  useEffect(() => {
+    latestPathRef.current = path;
+  });
+
   const { logout } = useAuth();
   const navigate = useNavigate();
 
   const refetch = useCallback(async () => {
     if (!path) return;
+    const requestKey = path;
     setLoading(true);
     setError(null);
     try {
       const result = await apiFetch(path);
-      setFetchedKey(path);
+      if (latestPathRef.current !== requestKey) return; // superseded by a newer request — ignore this stale response
+      setFetchedKey(requestKey);
       setData(result);
+      setLoading(false);
     } catch (err) {
       if (err instanceof AuthError) {
         await logout();
         navigate('/login', { replace: true });
         return;
       }
-      setFetchedKey(path);
+      if (latestPathRef.current !== requestKey) return;
+      setFetchedKey(requestKey);
       setError(err.message || 'Something went wrong');
-    } finally {
       setLoading(false);
     }
   }, [path, logout, navigate]);
