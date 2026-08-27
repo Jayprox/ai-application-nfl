@@ -79,6 +79,13 @@ router.post('/', async (req, res) => {
   if (scope !== 'career' && !season) {
     return res.status(400).json({ error: 'season is required for season/last5/game_log scope' });
   }
+  if (scope !== 'career' && !/^\d{4}$/.test(String(season))) {
+    // Without this, a non-numeric season (or e.g. "20255") reaches the DB
+    // as a query param against an INT column, which Postgres rejects with
+    // a raw type-cast error — caught below and previously surfaced as a
+    // generic 500 instead of a clean 400 telling the caller what's wrong.
+    return res.status(400).json({ error: 'season must be a 4-digit year' });
+  }
   if (splits?.game_slot && !VALID_GAME_SLOTS.includes(splits.game_slot)) {
     return res.status(400).json({ error: `splits.game_slot must be one of: ${VALID_GAME_SLOTS.join(', ')}` });
   }
@@ -100,6 +107,10 @@ router.post('/', async (req, res) => {
     const freshness = await getFreshness('sync_historical_stats');
     res.json({ data: result.data, meta: { sample_size: result.sampleSize, freshness } });
   } catch (err) {
+    // A malformed player UUID throws a Postgres error (invalid input
+    // syntax) here too — same client-input case routes/players.js's
+    // GET /:id already treats as "not found" rather than a 500.
+    if (err.code === '22P02') return res.status(404).json({ error: 'player not found' });
     console.error('[routes/query] failed:', err);
     res.status(500).json({ error: 'internal error' });
   }

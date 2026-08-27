@@ -93,10 +93,22 @@ async function refresh(rawRefreshToken) {
   const tokenHash = hashToken(rawRefreshToken);
   const record = await findRefreshTokenByHash(tokenHash);
 
-  if (!record || record.revoked_at || record.expires_at < new Date()) {
-    // Presenting an unknown, already-revoked, or expired refresh token
-    // is treated the same way: reject, no session-fixing hints given
-    // back to the caller about which specific reason it failed for.
+  if (record?.revoked_at) {
+    // This exact refresh token was already rotated away once before, and
+    // is now being presented again — the only realistic way that happens
+    // is the token leaked and both the legitimate client and whoever has
+    // the leaked copy tried to use it. Treat it as a compromise signal:
+    // revoke every refresh token this user currently holds, not just this
+    // one, so a stolen copy dies immediately rather than staying valid
+    // until its own 30-day expiry. The legitimate client just has to log
+    // in again — same cost as any other forced-logout security response.
+    await revokeAllRefreshTokensForUser(record.user_id);
+    throw new AuthError('invalid refresh token');
+  }
+  if (!record || record.expires_at < new Date()) {
+    // Unknown or naturally-expired token — ordinary rejection. Same
+    // generic error either way, no hint back to the caller about which
+    // specific reason it failed for.
     throw new AuthError('invalid refresh token');
   }
 
@@ -191,6 +203,13 @@ async function saveRefreshTokenHash(userId, hash, expiresAt) {
 
 async function revokeRefreshToken(tokenId) {
   await query('UPDATE refresh_tokens SET revoked_at = now() WHERE token_id = $1', [tokenId]);
+}
+
+async function revokeAllRefreshTokensForUser(userId) {
+  await query(
+    'UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL',
+    [userId]
+  );
 }
 
 async function findApiKeyByHash(hash) {
