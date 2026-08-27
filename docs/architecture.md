@@ -115,7 +115,7 @@ graph TB
 
 Because `VITE_API_URL` is baked into the JS bundle at *build* time (Vite only exposes `VITE_`-prefixed vars, and only at build), it has to be set on the `web` service **before** its first deploy, not after — same for `CORS_ORIGIN` on `backend-api`, which needs the real `web` domain before `backend-api` will accept the browser's requests. Both Railway service domains were generated first (`generate-domain`, no deploy required), then each service's counterpart var was set from the other's known domain, and only then were both sources connected to trigger their builds. `backend-api` also has a `healthcheckPath` of `/health` — the same route already used for local debugging, now doing double duty as Railway's deploy-readiness check (confirms the container is up *and* can reach Postgres, not just that the process started).
 
-`ingestion-worker` remains unconnected/undeployed — expected, since "Ingestion worker automation" is still open in the Phase 5 build order.
+`ingestion-worker` is now also live — see its own subsection below.
 
 ### Ingestion worker (as built)
 
@@ -133,7 +133,7 @@ Because `VITE_API_URL` is baked into the JS bundle at *build* time (Vite only ex
 
 **Manual dry-run mode.** `node worker/ingestion-worker.js <jobType>` (e.g. `npm run worker -- sync_roster`) runs one job once against a real `DATABASE_URL` and exits, rather than starting the unattended scheduler — the same "test it by hand against real data before trusting it to run on its own" pattern `scripts/backfill-historical.js` was run with.
 
-**Deploy status:** code complete; Railway service `ingestion-worker` (already provisioned with `DATABASE_URL`/`REDIS_URL`, no public domain — matches the architecture above) still needs its `rootDirectory` set to `worker` and its GitHub source connected, same two-step pattern used for `web`. See the checklist for current status.
+**Deploy status:** live. `ingestion-worker`'s `rootDirectory` was set to `worker` and its GitHub source connected (same two-step pattern used for `web` — `rootDirectory` first so the build only installs/runs `worker/`, then `connect-service-source` to trigger the build). Restart policy set to `ON_FAILURE` (max 5 retries) since it's a long-running background process, not a request/response service — a crash should restart it rather than leave it dead, but not loop forever if something's fundamentally broken (e.g. a bad `DATABASE_URL`). No domain was generated — matches the architecture above; it only makes outbound calls plus a private-network connection to Postgres/Redis. Verified via real deploy logs, not just "build succeeded": `[ingestion-worker] loaded last-run times for 3 job type(s) from ingestion_runs` confirms it actually reached the production database and read back the three dry-run jobs' results, followed by `[ingestion-worker] started.` confirming the scheduler's `setInterval` is running.
 
 ---
 

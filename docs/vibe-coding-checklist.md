@@ -351,7 +351,7 @@ is actually built, not as it's planned.)*
       real, live Postgres data**, verified manually in the browser after
       every feature. Remaining Phase 5 items: Ingestion worker automation
       and Deploy.
-- [ ] Ingestion worker automation — turn the one-time seed into the real
+- [x] Ingestion worker automation — turn the one-time seed into the real
       scheduled worker (fixed / proximity / game-window jobs)
       *(Code done, deploy pending your `git push`. `worker/ingestion-worker.js`
       replaces the old design-stage skeleton: the scheduler (all four
@@ -394,8 +394,21 @@ is actually built, not as it's planned.)*
       `sync_historical_stats` 404 for `stats_player_week_2026.csv` is
       expected, not a bug — nflverse hasn't published a 2026 stats file
       yet since the season hasn't been played.
-      Next: push, then connect the already-provisioned `ingestion-worker`
-      Railway service to the repo and verify via its deploy logs.)*
+      **Deployed and confirmed live.** `ingestion-worker`'s `rootDirectory`
+      was set to `worker` and its GitHub source connected (same pattern as
+      `web`); build succeeded and the deploy logs show real proof of life,
+      not just a clean process start:
+      `[ingestion-worker] loaded last-run times for 3 job type(s) from
+      ingestion_runs` — meaning it reached the production database and
+      read back the three jobs we'd just dry-run — followed by
+      `[ingestion-worker] started.` confirming the scheduler is actually
+      ticking. Restart policy set to `ON_FAILURE` (max 5 retries), since
+      unlike `backend-api`/`web` this is a background process with no
+      request/response healthcheck to lean on. No public domain, matching
+      the architecture doc — it only makes outbound calls plus a
+      private-network connection to Postgres/Redis. All three Railway
+      services (`backend-api`, `web`, `ingestion-worker`) are now live —
+      **Phase 5 is fully complete.**)*
 - [x] Deploy — live on Railway with a real URL.
       *(Done: `backend-api` (root of the repo, `node backend/server.js`)
       and a new `web` service (`frontend/`, Vite build + a small Express
