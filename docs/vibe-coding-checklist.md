@@ -353,7 +353,30 @@ is actually built, not as it's planned.)*
       and Deploy.
 - [ ] Ingestion worker automation — turn the one-time seed into the real
       scheduled worker (fixed / proximity / game-window jobs)
-- [ ] Deploy — live on Railway with a real URL
+- [x] Deploy — live on Railway with a real URL.
+      *(Done: `backend-api` (root of the repo, `node backend/server.js`)
+      and a new `web` service (`frontend/`, Vite build + a small Express
+      static server with SPA fallback — see `frontend/server.js`) are
+      both connected to the GitHub repo and live:
+      - Backend: https://backend-api-production-15ce.up.railway.app
+      - Web app: https://web-production-5f05d.up.railway.app
+
+      Verified via real Railway deploy logs (not just "build succeeded")
+      — both show a clean process start with no crash:
+      `[server] chalk-that-nfl backend-api listening on :8080` and
+      `[web] chalk-that-nfl-web serving dist/ on :8080`. Added
+      `CORS_ORIGIN` (backend-api) and `VITE_API_URL` (web, baked in at
+      *build* time — had to be set before the first deploy, not after)
+      so the two services can actually talk to each other cross-origin;
+      backend-api needed one redeploy after CORS_ORIGIN was added since
+      the var landed after its container had already started. Also set
+      `healthcheckPath: /health` on backend-api so Railway's own
+      deploy-readiness check now confirms real DB connectivity, not just
+      "the process started." Full details in `docs/architecture.md`'s new
+      "Deploy (as built)" section. `ingestion-worker` is intentionally
+      still undeployed — that's the one remaining Phase 5 item. Pending:
+      your own click-through in the browser to confirm login → real data
+      works end-to-end on the live URLs, same as every other feature.)*
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 

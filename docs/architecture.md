@@ -107,6 +107,16 @@ graph TB
 
 `JWT_SECRET` only ever needs to exist on `backend-api` — it's the only service verifying tokens; `ingestion-worker` never authenticates incoming requests, so it never needs it.
 
+### Deploy (as built)
+
+`backend-api` and the React web app (`web`) are both live on Railway, connected to the same GitHub repo with Railpack (Railway's builder) auto-detecting each as a Node project — `backend-api` builds from the repo root (`package.json`'s `start` script runs `node backend/server.js`), `web` builds from the `frontend/` subdirectory via each service's **Root Directory** setting.
+
+`web` isn't a static-file host — Railpack runs `npm run build` (`vite build`, producing `dist/`) then `npm start`, which runs `frontend/server.js`: a small Express server (matching the rest of the stack rather than introducing a second server pattern) that serves `dist/` and falls back to `index.html` for any unmatched path, so a hard refresh or shared link on a client-routed page (e.g. `/players/<uuid>`) resolves correctly instead of 404ing.
+
+Because `VITE_API_URL` is baked into the JS bundle at *build* time (Vite only exposes `VITE_`-prefixed vars, and only at build), it has to be set on the `web` service **before** its first deploy, not after — same for `CORS_ORIGIN` on `backend-api`, which needs the real `web` domain before `backend-api` will accept the browser's requests. Both Railway service domains were generated first (`generate-domain`, no deploy required), then each service's counterpart var was set from the other's known domain, and only then were both sources connected to trigger their builds. `backend-api` also has a `healthcheckPath` of `/health` — the same route already used for local debugging, now doing double duty as Railway's deploy-readiness check (confirms the container is up *and* can reach Postgres, not just that the process started).
+
+`ingestion-worker` remains unconnected/undeployed — expected, since "Ingestion worker automation" is still open in the Phase 5 build order.
+
 ---
 
 ## 4.5 API surface (as built)
