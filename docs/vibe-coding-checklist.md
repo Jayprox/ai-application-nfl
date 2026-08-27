@@ -374,6 +374,26 @@ is actually built, not as it's planned.)*
       Railway service (own `package.json`) so it can get `rootDirectory:
       worker`, same monorepo pattern as `web`. Full writeup in
       `docs/architecture.md`'s new "Ingestion worker (as built)" section.
+
+      Dry-run caught two real bugs before deploy, both fixed: (1)
+      `sync_schedule` divided its games-synced count by 15 (leftover
+      copy-paste from the exact bug already fixed once in
+      `scripts/backfill-historical.js`'s `loadGames()`), producing a
+      fractional count that crashed `ingestion_runs`'s integer column —
+      fixed the increment, and added a defensive `Math.round()` in
+      `logRunSuccess` so a bad count from any future job fails in that
+      job's own try/catch instead of crashing the logging step outright.
+      (2) The CLI's one-shot dry-run mode called `scheduleRetry()` on
+      failure same as the live scheduler, but then exited immediately —
+      the retry's `setTimeout` never got to fire before the process died,
+      so a failed dry-run silently looked like it just... stopped, with no
+      second attempt. `runJob()` now takes a `{ retry }` option; the CLI
+      passes `retry: false` and exits 0/1 based on the real outcome
+      instead. `sync_roster` (2,930 players) and the corrected
+      `sync_schedule` both verified clean against real data; the
+      `sync_historical_stats` 404 for `stats_player_week_2026.csv` is
+      expected, not a bug — nflverse hasn't published a 2026 stats file
+      yet since the season hasn't been played.
       Next: push, then connect the already-provisioned `ingestion-worker`
       Railway service to the repo and verify via its deploy logs.)*
 - [x] Deploy — live on Railway with a real URL.

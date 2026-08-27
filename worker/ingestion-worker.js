@@ -335,7 +335,7 @@ async function syncSchedule() {
            status = EXCLUDED.status`,
         params
       );
-      processed += values.length / 15;
+      processed += values.length;
     }
   }
 
@@ -605,17 +605,25 @@ async function isDue(jobType, job, now) {
   }
 }
 
-async function runJob(jobType, job) {
+// `retry: false` is used by the CLI's one-shot dry-run mode (see the entry
+// point below) — without it, a failed job would schedule a setTimeout
+// retry that the CLI process then kills anyway when it exits right after
+// this promise resolves, so the retry silently never runs. The background
+// scheduler (tick() -> runJob(jobType, job), no options) always wants the
+// real retry/backoff behavior, so it keeps the default.
+async function runJob(jobType, job, { retry = true } = {}) {
   const runId = await logRunStart(jobType, job.source);
   lastRunAt[jobType] = new Date();
 
   try {
     const { recordsProcessed } = await job.run();
     await logRunSuccess(runId, recordsProcessed);
+    return { ok: true };
   } catch (err) {
     console.error(`[job:${jobType}] failed:`, err);
     await logRunFailure(runId, err);
-    scheduleRetry(jobType, job);
+    if (retry) scheduleRetry(jobType, job);
+    return { ok: false, err };
   }
 }
 
@@ -711,9 +719,14 @@ async function logRunStart(jobType, source) {
 }
 
 async function logRunSuccess(runId, recordsProcessed) {
+  // records_processed is an INT column — defensively round/coerce here so
+  // a future job returning a non-integer count (as sync_schedule once did,
+  // see git history) fails loudly in that job's own try/catch instead of
+  // crashing the logging step for every job.
+  const safeCount = Number.isFinite(recordsProcessed) ? Math.round(recordsProcessed) : 0;
   await pool.query(
     `UPDATE ingestion_runs SET status = 'success', finished_at = now(), records_processed = $2 WHERE run_id = $1`,
-    [runId, recordsProcessed ?? 0]
+    [runId, safeCount]
   );
 }
 
@@ -764,7 +777,9 @@ if (require.main === module) {
       process.exit(1);
     }
     console.log(`[ingestion-worker] running "${onceJobType}" once (manual dry run)...`);
-    runJob(onceJobType, JOBS[onceJobType]).then(() => pool.end()).then(() => process.exit(0));
+    runJob(onceJobType, JOBS[onceJobType], { retry: false }).then(({ ok }) =>
+      pool.end().then(() => process.exit(ok ? 0 : 1))
+    );
   } else {
     start();
   }
