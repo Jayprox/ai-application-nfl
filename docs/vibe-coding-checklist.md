@@ -298,7 +298,20 @@ is actually built, not as it's planned.)*
       Split filters (Feature 4) and the injury badge (Feature 5) are
       deliberately not here yet. `npm run build`, lint, and `npm audit`
       all clean.)*
-- [ ] Feature 4: Situational split filters wired into player detail
+- [x] Feature 4: Situational split filters wired into player detail.
+      *(Done: added the Home/Away, Time Slot, and Weather dropdowns from
+      the Phase 4 mockup, plus Clear, directly beneath the scope tabs on
+      `PlayerDetailPage`. All three combine freely and feed `POST
+      /query`'s `splits` object, persisting across scope-tab switches.
+      Added `constants/splits.js` mirroring the backend's
+      `VALID_GAME_SLOTS`/`VALID_WEATHER` exactly. Known, documented
+      limitation carried over from the historical backfill: weather
+      splits other than "Dome" will correctly return a graceful
+      zero-sample-size result for now — `games.csv` only gives us roof
+      type, not real precipitation data, so sunny/overcast/rain/snow are
+      never actually populated until a future weather-API ingestion pass
+      (see `docs/architecture.md` §3). Not a bug. `npm run build`, lint,
+      and `npm audit` all clean.)*
 - [ ] Feature 5: Injury status wired into player records + UI badge
 - [ ] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
       all screens

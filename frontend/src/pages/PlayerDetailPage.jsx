@@ -4,11 +4,16 @@ import { useApiFetch } from '../hooks/useApiFetch';
 import { useStatsQuery } from '../hooks/useStatsQuery';
 import AsyncState from '../components/AsyncState';
 import { STAT_COLUMNS_BY_POSITION_GROUP } from '../constants/statColumns';
+import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 
-// Phase 4 screen 5 (the app's main screen) / Phase 5 Feature 3 — scope
-// tabs (season/last5/career/game log) wired to POST /query. Split filters
-// (Feature 4) and the injury badge (Feature 5) are deliberately not here
-// yet — kept as their own checklist items.
+// Phase 4 screen 5 (the app's main screen) / Phase 5 Feature 3 + 4 — scope
+// tabs (season/last5/career/game log) plus situational split filters
+// (home/away, time slot, weather), both wired to POST /query. The injury
+// badge (Feature 5) is deliberately not here yet — kept as its own
+// checklist item.
+
+const selectClass =
+  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
 
 const SCOPES = [
   { value: 'season', label: 'Season Avg' },
@@ -47,6 +52,9 @@ export default function PlayerDetailPage() {
   const { playerId } = useParams();
   const [scope, setScope] = useState('season');
   const [season, setSeason] = useState(DEFAULT_SEASON);
+  const [homeAway, setHomeAway] = useState('');
+  const [gameSlot, setGameSlot] = useState('');
+  const [weatherCondition, setWeatherCondition] = useState('');
 
   const {
     data: playerData,
@@ -56,12 +64,26 @@ export default function PlayerDetailPage() {
   } = useApiFetch(`/players/${playerId}`);
   const player = playerData?.data;
 
+  const hasActiveSplit = !!(homeAway || gameSlot || weatherCondition);
+  const clearSplits = () => {
+    setHomeAway('');
+    setGameSlot('');
+    setWeatherCondition('');
+  };
+
   const queryBody = useMemo(() => {
     if (!player) return null;
     const body = { entity_type: 'player', entity_id: playerId, scope };
     if (scope !== 'career') body.season = season;
+    if (hasActiveSplit) {
+      body.splits = {
+        ...(homeAway && { home_away: homeAway }),
+        ...(gameSlot && { game_slot: gameSlot }),
+        ...(weatherCondition && { weather_condition: weatherCondition }),
+      };
+    }
     return body;
-  }, [player, playerId, scope, season]);
+  }, [player, playerId, scope, season, homeAway, gameSlot, weatherCondition, hasActiveSplit]);
 
   const { data: statsData, error: statsError, loading: statsLoading, refetch: refetchStats } =
     useStatsQuery(queryBody);
@@ -119,6 +141,43 @@ export default function PlayerDetailPage() {
               </option>
             ))}
           </select>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select value={homeAway} onChange={(e) => setHomeAway(e.target.value)} className={selectClass}>
+          <option value="">Home/Away: All</option>
+          <option value="home">Home only</option>
+          <option value="away">Away only</option>
+        </select>
+        <select value={gameSlot} onChange={(e) => setGameSlot(e.target.value)} className={selectClass}>
+          <option value="">Time Slot: All</option>
+          {GAME_SLOT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={weatherCondition}
+          onChange={(e) => setWeatherCondition(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">Weather: All</option>
+          {WEATHER_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {hasActiveSplit && (
+          <button
+            type="button"
+            onClick={clearSplits}
+            className="text-sm text-slate-500 underline hover:text-slate-900"
+          >
+            Clear
+          </button>
         )}
       </div>
 
