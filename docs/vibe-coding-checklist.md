@@ -374,9 +374,9 @@ is actually built, not as it's planned.)*
       deploy-readiness check now confirms real DB connectivity, not just
       "the process started." Full details in `docs/architecture.md`'s new
       "Deploy (as built)" section. `ingestion-worker` is intentionally
-      still undeployed — that's the one remaining Phase 5 item. Pending:
-      your own click-through in the browser to confirm login → real data
-      works end-to-end on the live URLs, same as every other feature.)*
+      still undeployed — that's the one remaining Phase 5 item. Confirmed
+      working end-to-end in the browser on the live URLs — login through
+      real team/player data, same as every other feature.)*
 
 **Checkpoint after each feature:** Does it still match the system design? Any drift?
 
