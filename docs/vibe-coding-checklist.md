@@ -441,14 +441,111 @@ is actually built, not as it's planned.)*
 ## Phase 6 — Hardening Pass
 *This is what separates a demo from a portfolio app. Don't skip it.*
 
-- [ ] Error handling on all API calls (try/catch, user-facing error states)
-- [ ] Loading states (skeleton loaders or spinners where data is async)
-- [ ] Empty states (what does the UI show with no data?)
-- [ ] Input validation (client-side + server-side)
-- [ ] Environment variables (no API keys in code, no `.env` committed)
-- [ ] Basic auth/access control review (nothing exposed that shouldn't be)
-- [ ] Mobile responsiveness check (even if it's a "desktop app")
-- [ ] Console errors cleared
+- [x] Error handling on all API calls (try/catch, user-facing error states)
+      *(Audited, not newly built — this fell out of how Phase 5 was
+      structured. Backend: every route handler in `backend/routes/*.js`
+      has its own try/catch returning a JSON `{error}` body with the right
+      status code, plus a global fallback handler in `backend/server.js`
+      so an uncaught bug never reaches a client as a raw stack trace.
+      Frontend: every data-backed screen goes through `useApiFetch` or
+      `useStatsQuery`, which centralize try/catch, `AuthError`
+      handling (session-expired -> bounce to `/login`), and surface
+      everything else through the shared `AsyncState` component. Two real
+      gaps found and fixed while reviewing this: `POST /query` returned a
+      generic 500 for a malformed player id or a non-numeric `season`
+      instead of a clean 404/400 like `/players/:id` already did for the
+      same class of input — fixed and confirmed live via a real
+      unauthenticated-shape request through the browser's own session
+      (`entity_id: "not-a-uuid"` -> 404 "player not found"; `season:
+      "abc"` -> 400 "season must be a 4-digit year").)*
+- [x] Loading states (skeleton loaders or spinners where data is async)
+      *(Every data screen shows a loading message via `AsyncState`
+      (Team/Player browse and detail) while `POST /query` is in flight
+      (Player detail's stat views); `LoginPage` has its own `submitting`
+      state disabling the button and swapping its label to "Signing in…".
+      Found and fixed two real bugs while stress-testing this — see
+      "Console errors cleared" below; both were really loading-state bugs
+      wearing a different hat.)*
+- [x] Empty states (what does the UI show with no data?)
+      *(Done in Phase 5 Feature 6 — scenario-aware messages for
+      rookie/no-history, an active split with zero results, an
+      unplayed 2026 week, and "not on a roster that season"; Team/Player
+      browse have generic "no results" states from Features 1-2. Verified
+      live again during this pass, e.g. Aaron Donald (retired) correctly
+      shows "No recorded games for Aaron Donald in 2025 — they may not
+      have been on an NFL roster that season" rather than an empty grid.)*
+- [x] Input validation (client-side + server-side)
+      *(Server-side was already solid — `POST /query` validates
+      `entity_type`/`scope`/`season`/`splits.*` against explicit allow-lists,
+      `/players` validates `position_group`, `/teams/:id` validates a
+      numeric id, `/login` requires both fields. Closed the one real gap:
+      `season` wasn't checked to actually be a 4-digit year, so a
+      non-numeric value reached Postgres as a raw type-cast error and
+      surfaced as a 500 — now a clean 400 before the query ever runs (see
+      above). Client-side: `LoginPage`'s fields are `required`; every
+      other input is a fixed dropdown/tab, not free text, so there's
+      nothing else to malform.)*
+- [x] Environment variables (no API keys in code, no `.env` committed)
+      *(Confirmed clean: `.env` is gitignored at the repo root (the bare
+      `.env` pattern applies recursively, so `frontend/.env` and
+      `worker/.env` are covered too), `.env.example` only has placeholder
+      text, `JWT_SECRET`/`DATABASE_URL`/`CORS_ORIGIN` are all read from
+      `process.env` with no hardcoded fallback secrets, and
+      `backend/auth.js` fails loudly at startup if `JWT_SECRET` is unset
+      rather than silently signing tokens with `undefined`. Grepped the
+      whole repo (`*.js`, `*.jsx`, excluding `.env.example`) for
+      connection strings/API-key-shaped literals — zero hits.)*
+- [x] Basic auth/access control review (nothing exposed that shouldn't be)
+      *(`authenticate` middleware gates every route except `/health`,
+      `/login`, `/refresh`, `/logout` — confirmed by reading
+      `backend/server.js`'s route registration order. CORS is a real
+      allow-list (`CORS_ORIGIN`), never `'*'`. Closed one real gap:
+      `backend/auth.js`'s own comment said a replayed (already-rotated)
+      refresh token should be treated as a compromise signal and revoke
+      the whole session — but the code only ever rejected the one
+      request. Now it actually does what the comment said: presenting an
+      already-used refresh token revokes every refresh token that user
+      currently holds, not just the one presented. Reviewed and
+      *deliberately left alone*: tokens are still returned in the JSON
+      body rather than an httpOnly cookie — that's an accepted MVP
+      tradeoff already called out in `backend/routes/auth.js`'s own
+      header comment, and changing it is a bigger scope decision (affects
+      the future Swift app's auth model too) than a hardening-pass fix.)*
+- [x] Mobile responsiveness check (even if it's a "desktop app")
+      *(Verified live on the deployed app at a 390×844 viewport (iPhone-class
+      width) across Teams, Team Detail, Player Browse, and Player Detail —
+      nav bar, filters, stat grid, and empty states all reflow to a single
+      column cleanly with nothing clipped or overlapping. No changes
+      needed; the existing Tailwind classes (`flex-wrap`, responsive
+      `sm:grid-cols-2`, `overflow-x-auto` on the game log table) already
+      covered this.)*
+- [x] Console errors cleared
+      *(Went in expecting a clean report and found a real, reproducible
+      crash instead: clicking the **Game Log** tab on any player detail
+      page whited out the entire app with `TypeError: e.map is not a
+      function`. Root cause — switching `scope` re-renders
+      `PlayerDetailPage` with the new scope *before* `useStatsQuery`'s
+      effect has run, so for one render the page tries to `.map()` over
+      the *previous* scope's plain-object stats as if it were the new
+      scope's array of game rows, with no error boundary to catch it.
+      Fixed by having `useStatsQuery`/`useApiFetch` track which query
+      their `data` actually corresponds to (via state set only inside
+      `refetch()`, not a ref touched during render — oxlint's
+      `react(refs)` rule caught that first attempt) and reporting
+      `loading: true` for any render where the current data is stale.
+      Stress-testing *that* fix by rapid-clicking through all four scope
+      tabs surfaced a second, related bug: overlapping in-flight requests
+      with no cancellation meant an out-of-order response could
+      permanently overwrite the correct state, leaving the UI stuck on
+      "Loading stats…" forever. Fixed by tracking the most-recently-started
+      request and ignoring any response that's been superseded by the time
+      it resolves. Both fixes verified live post-deploy: single click on
+      Game Log (real data renders, no crash), and two separate rapid
+      4-click sequences in different orders (both settle correctly on the
+      actually-last-clicked tab with correct, matching data, no stuck
+      loading, clean console throughout).)*
+
+**Phase 6 complete.**
 
 ---
 
