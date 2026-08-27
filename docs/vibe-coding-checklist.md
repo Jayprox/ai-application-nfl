@@ -552,16 +552,24 @@ is actually built, not as it's planned.)*
 ## Phase 7 — Portfolio Packaging
 *An unpackaged app is invisible to recruiters and collaborators.*
 
-- [ ] **README.md**
-  - What it is (1 paragraph)
-  - Tech stack (with brief rationale)
-  - How to run locally
-  - Live demo link (if deployed)
-  - Screenshots or GIF
-  - Known limitations / future work
-- [ ] **Deployed** — Railway, Vercel, Render, or equivalent. A live URL matters.
-- [ ] **Loom or screen recording** — 2–3 min walkthrough. Optional but high value.
-- [ ] **Can you explain it in 2 minutes?** — Practice the architecture explanation out loud.
+- [x] **README.md**
+  - Written at repo root: what it is (framed around the real long-term
+    goal — a data layer a team of AI agents will query to help make
+    "smarter bets," not just a stats browser), a tech-stack table with a
+    one-line rationale per choice, step-by-step local setup (schema →
+    seed → historical backfill → test user → backend → frontend), both
+    live URLs, 4 real screenshots taken live off the deployed app (Teams,
+    a team roster, a player's season averages, and a player's game log —
+    the exact screen that had the Phase 6 crash, now working), and an
+    honest Known Limitations section (stubbed ingestion jobs, no test
+    suite, no rate limiting, refresh tokens in localStorage, no signup
+    flow, the NL-search/AI-agent layer being designed-not-built, no iOS
+    yet, no sportsbook odds).
+- [x] **Deployed** — all 3 Railway services (`backend-api`, `web`,
+      `ingestion-worker`) confirmed live; URLs in the README.
+- [ ] **Loom or screen recording** — not done. Optional, skipping for now.
+- [x] **Can you explain it in 2 minutes?** — see Architect's Gut Check
+      below; answered for real rather than left as a practice prompt.
 
 ---
 
@@ -569,11 +577,59 @@ is actually built, not as it's planned.)*
 
 Answer these. If you stumble on any, go back.
 
-1. Why did you choose this stack over alternatives?
-2. What's the hardest technical problem you solved?
-3. What would you do differently if you rebuilt it?
-4. What breaks first under load or edge cases?
-5. If a junior dev joined, could they navigate the codebase in 30 min?
+1. **Why did you choose this stack over alternatives?** Node/Express on
+   both the API and the ingestion worker so the whole backend is one
+   language, matching the sibling Chalk That MLB app rather than
+   introducing a second stack to context-switch between. Postgres over a
+   document store because the data is genuinely relational — players,
+   games, and four different `*_game_stats` tables all joined by foreign
+   key — and a `WHERE`/`JOIN` is the natural way to express "Mahomes,
+   home games, snow, 2024 season" rather than something to fight around.
+   React + Vite + plain JS (not TypeScript) to match the plain-JS backend.
+   Railway over something like Vercel+a separate DB host because one
+   project holding 3 services plus managed Postgres/Redis, all on the
+   same private network, meant no juggling connection strings across
+   providers.
+2. **What's the hardest technical problem you solved?** Not a backend
+   problem — a React render-timing race in the shared `useApiFetch`/
+   `useStatsQuery` hooks. Switching the Player page's scope tab from
+   "Season Avg" to "Game Log" changed what *shape* of data the render
+   expected (object vs. array) one render before the effect that would
+   have refetched it had run, so for one frame the hook was still
+   returning the old shape and `rows.map(...)` threw on a plain object —
+   whited out the whole app, with no error boundary to catch it. It only
+   showed up under live stress-testing, not code review. The fix — a
+   `useState`-tracked "which key does this data actually belong to" flag
+   computed during render, plus a *separate* ref (written only from a
+   dependency-less effect, never during render) to catch a second,
+   related out-of-order-response race — is now documented in
+   `docs/architecture.md` §4.7 as a general pattern, not a one-off patch.
+3. **What would you do differently if you rebuilt it?** Add a real
+   automated test suite from day one instead of relying on manual
+   dry-runs and live browser stress-testing — the Game Log bug above was
+   *found* that way, but a regression test would have caught it
+   automatically on every future change instead of needing another
+   deliberate stress-testing pass. I'd also lock in the current-season
+   live-stats vendor earlier — it's been "parked" since Phase 2 and three
+   ingestion jobs are still stubs waiting on it.
+4. **What breaks first under load or edge cases?** `/login` and
+   `/refresh` have no rate limiting — flagged explicitly in the Phase 6
+   hardening pass and deliberately deferred, and it's the honest answer
+   to "what's weakest under abuse." Under normal load, the Redis cache in
+   front of the query engine is what keeps repeat `/query` calls cheap;
+   without it (or if Redis went down), every request would recompute an
+   aggregate query against `*_game_stats` directly — correct, just
+   slower, no cached fast path.
+5. **If a junior dev joined, could they navigate the codebase in 30
+   min?** Yes, and it's been stress-tested in a real sense already —
+   every design decision that isn't obvious from the code itself
+   (why ingestion is a separate service, why `/query` is one endpoint for
+   every scope, why the stale-key pattern exists in the shared hooks) is
+   written down in `docs/architecture.md`, organized by whether it's a
+   reusable platform pattern or an NFL-specific choice. `docs/
+   vibe-coding-checklist.md` has the phase-by-phase build log with real
+   bugs and fixes, for the "why does this look like this" questions the
+   architecture doc doesn't answer.
 
 ---
 
@@ -582,9 +638,14 @@ Answer these. If you stumble on any, go back.
 
 | Date | What I built | Decision made | Why |
 |------|-------------|---------------|-----|
-|      |             |               |     |
-|      |             |               |     |
-|      |             |               |     |
+| Phase 1-2 | Vision, platform-vs-NFL-specific split, schema design | Independent canonical player IDs + a crosswalk table, instead of anchoring to one vendor's IDs | Mirrors the real-world Chadwick Bureau Register pattern for baseball; makes swapping/adding a data vendor a data change, not a schema migration |
+| Phase 3-4 | Screen inventory, `/query` API contract, situational splits scope | One shared query engine (`POST /query`) for every client, no separate endpoints per screen | The same endpoint has to work for a human clicking filters today and an AI agent calling it directly later — never two parallel APIs |
+| Phase 5 | Schema live on Railway Postgres/Redis, `scripts/seed.js`, Core API routes, `scripts/backfill-historical.js`, React frontend scaffold + 5 features wired to real data, both services deployed | Historical backfill uses `ON CONFLICT DO NOTHING` (one-time), not the incremental upsert the worker uses | A one-time load shouldn't silently overwrite anything; correctness first, speed of the actual sync loop is the worker's job |
+| Phase 5 | Found and fixed the nflverse `'LA'` vs `'LAR'` team-abbreviation mismatch that was silently dropping 112 Rams games and cascading into a full-season rollback | Added an alias-normalization step wherever an nflverse abbreviation is looked up, documented in `docs/architecture.md` §3 | A one-line data quirk that would otherwise re-break the ingestion worker the same way later |
+| Phase 5 | Ingestion worker automation — real scheduling for all 4 shapes, 3 of 6 jobs fully real (nflverse-sourced), 3 left as honest stubs | Worker always targets the *current* season and upserts (`ON CONFLICT DO UPDATE`), unlike the one-time backfill | Scores/statuses/flex-schedule times need to actually update on a re-run, not just insert once |
+| Phase 6 | Full hardening pass: input validation on `POST /query`, refresh-token replay → cascade revoke in `auth.js`, mobile responsiveness check, env var audit | Replaying an already-rotated refresh token now revokes every session for that user, not just the one request | Replay of a rotated token is a real theft signal, not an ordinary expired-token case |
+| Phase 6 | Found (via my own live stress-testing, not a bug report) and fixed a production-crashing render race in the Game Log tab, plus a related out-of-order-response stuck-loading bug | `useState`-based staleness check computed during render + a ref written only from an effect, never during render | The crash happens in the render itself, before any effect runs — no amount of clearing data inside an effect can prevent it |
+| Phase 7 | README.md, live screenshots, Architect's Gut Check answered for real, this log filled in | Framed the README's "what it is" around the actual long-term goal (an AI-agent-queryable data layer for betting research), not just "a stats browser" | The portfolio packaging should represent where the project is actually headed, not just where Part 1 currently stops |
 
 ---
 
