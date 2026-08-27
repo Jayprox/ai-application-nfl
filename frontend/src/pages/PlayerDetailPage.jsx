@@ -4,6 +4,7 @@ import { useApiFetch } from '../hooks/useApiFetch';
 import { useStatsQuery } from '../hooks/useStatsQuery';
 import AsyncState from '../components/AsyncState';
 import InjuryBadge from '../components/InjuryBadge';
+import EmptyStatsMessage from '../components/EmptyStatsMessage';
 import { STAT_COLUMNS_BY_POSITION_GROUP } from '../constants/statColumns';
 import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 
@@ -186,10 +187,17 @@ export default function PlayerDetailPage() {
 
       {statsLoading || statsError ? (
         <AsyncState loading={statsLoading} error={statsError} loadingLabel="Loading stats…" onRetry={refetchStats} />
+      ) : !statsData?.meta?.sample_size ? (
+        <EmptyStatsMessage
+          scope={scope}
+          season={season}
+          hasActiveSplit={hasActiveSplit}
+          playerName={player.full_name}
+        />
       ) : scope === 'game_log' ? (
-        <GameLogTable rows={statsData?.data ?? []} columns={columns} />
+        <GameLogTable rows={statsData.data} columns={columns} />
       ) : (
-        <StatGrid stats={statsData?.data} columns={columns} sampleSize={statsData?.meta?.sample_size} />
+        <StatGrid stats={statsData.data} columns={columns} />
       )}
 
       {statsData?.meta && (
@@ -202,10 +210,7 @@ export default function PlayerDetailPage() {
   );
 }
 
-function StatGrid({ stats, columns, sampleSize }) {
-  if (!sampleSize) {
-    return <p className="text-sm text-slate-500">No games match this selection yet.</p>;
-  }
+function StatGrid({ stats, columns }) {
   return (
     <dl className="grid gap-px overflow-hidden rounded-md border border-slate-200 bg-slate-200 sm:grid-cols-2">
       {columns.map(({ key, label }) => {
@@ -224,9 +229,6 @@ function StatGrid({ stats, columns, sampleSize }) {
 }
 
 function GameLogTable({ rows, columns }) {
-  if (!rows.length) {
-    return <p className="text-sm text-slate-500">No games match this selection yet.</p>;
-  }
   return (
     <div className="overflow-x-auto rounded-md border border-slate-200">
       <table className="w-full min-w-max text-sm">

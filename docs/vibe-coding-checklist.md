@@ -327,8 +327,30 @@ is actually built, not as it's planned.)*
       that source exists. Not a bug; documented in `InjuryBadge.jsx`
       itself so it isn't mistaken for one later. `npm run build`, lint,
       and `npm audit` all clean.)*
-- [ ] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
-      all screens
+- [x] Feature 6: Empty states (offseason/preseason/bye-week/rookie) across
+      all screens.
+      *(Done: added `EmptyStatsMessage` to `PlayerDetailPage` — where all
+      four named scenarios actually live — replacing the flat "no games"
+      text with a reason picked from what's already known client-side: a
+      zero-sample career scope reads as "likely a rookie, or a player
+      without tracked game history"; an active split filter reads as "try
+      clearing a split"; season 2026 specifically (the one season known
+      to have zero stats system-wide post-backfill) reads as "hasn't been
+      played yet"; anything else reads as "not on an NFL roster that
+      season" (covers inactive years, pre-rookie years, retirement).
+      Bye week needed no special case — Game Log already skips it
+      gracefully on its own since there's simply no game row that week.
+      Team browse/detail and Player browse already had generic (not
+      scenario-specific) empty/no-results states from Features 1-2, which
+      is the right level of effort there since none of the four named
+      scenarios apply to a roster list or a search result. `npm run
+      build`, lint, and `npm audit` all clean.)*
+
+      **All 6 Features done — the full Phase 4 screen set (Login, Team
+      browse/detail, Player browse/detail) is now wired end-to-end to
+      real, live Postgres data**, verified manually in the browser after
+      every feature. Remaining Phase 5 items: Ingestion worker automation
+      and Deploy.
 - [ ] Ingestion worker automation — turn the one-time seed into the real
       scheduled worker (fixed / proximity / game-window jobs)
 - [ ] Deploy — live on Railway with a real URL
