@@ -117,6 +117,24 @@ Because `VITE_API_URL` is baked into the JS bundle at *build* time (Vite only ex
 
 `ingestion-worker` remains unconnected/undeployed — expected, since "Ingestion worker automation" is still open in the Phase 5 build order.
 
+### Ingestion worker (as built)
+
+`worker/ingestion-worker.js` turns the one-time `scripts/seed.js` / `scripts/backfill-historical.js` scripts into a real recurring worker, replacing the earlier design-stage skeleton (scheduling logic only, every job body a `TODO`) that lived at this path before this build step.
+
+**What's real vs. still stubbed.** All four schedule shapes from the original design (`fixed`, `proximity`, `day-of-week-proximity`, `game-window`) are live, backed by real Postgres reads (`getNextUpcomingGame`, `isGameWindowActive`) rather than TODO stubs. Of the six jobs, three are fully implemented — `sync_roster`, `sync_schedule`, `sync_historical_stats` — because they're nflverse-sourced, the same source the historical backfill already uses, so no new vendor integration was needed. The other three — `sync_forecast_weather` (Open-Meteo), `sync_injury_reports` and `sync_live_stats` (live-stats vendor) — stay stubs: their *scheduling* fires for real (the proximity buckets tighten as kickoff approaches, the injury cadence tightens Mon→Sun per the Phase 2 discussion, the game-window check is a real query against `games`), but the fetch/normalize/upsert bodies remain `TODO` since they depend on the still-open vendor decision (§6, "Still open") and an unprovisioned `OPEN_METEO_API_KEY`. Wiring the scheduling now means only the vendor client + upsert need to be dropped in later, not the whole pipeline.
+
+**Incremental, not one-time.** `scripts/backfill-historical.js` took an explicit `<startSeason> <endSeason>` range and used `ON CONFLICT DO NOTHING` — correct for a one-time historical load, wrong for an ongoing worker (a game's score would never update from `scheduled` to `final` once inserted). The worker instead always targets *the current NFL season* (`currentNflSeason()` — Sept–Feb spans one labeled season year; treats Mar–Dec as the season starting that calendar year) and upserts with `ON CONFLICT DO UPDATE`, so scores, statuses, flex-schedule datetime changes, and stat corrections all actually land on a re-run, not just first-insert.
+
+**Identity resolution is implemented**, not just documented — `resolveIdentity(source, sourcePlayerId, candidate, cache)` in `worker/ingestion-worker.js` follows the same 5-step algorithm the original skeleton's comments described: crosswalk lookup → normalized name+team+position match → confident match crosswalked as `'matched'` → ambiguous/no match inserts a new `players` row crosswalked as `'manual_review'` rather than silently dropping the record. Used by both `sync_roster` and `sync_historical_stats`, with an in-memory `Map` cache scoped to a single job run (not persisted across runs — a restart just re-queries the crosswalk table, which is already fast and correct).
+
+**`ingestion_runs` is live** — every job run gets a real row (`logRunStart`/`logRunSuccess`/`logRunFailure`), which is what `POST /query`'s `meta.freshness` will eventually read once the query engine is wired to it (currently that field reflects whatever's in the table already). On worker startup, `loadLastRunAtFromDb()` seeds the in-memory `lastRunAt` map from the latest successful run per `job_type`, so a Railway restart doesn't forget recent runs and immediately re-fire every job.
+
+**Self-contained service.** `worker/` has its own `package.json` (`pg`, `dotenv`, `csv-parse` — no `express`, since it has no HTTP server or public domain) rather than requiring code from `../backend` or `../scripts`, matching how `frontend/` is also fully independent and matching Railway's per-service `rootDirectory` model (only `worker/` gets installed/built for this service). The tradeoff: the small CSV-fetch/team-abbreviation-normalization/position-group helpers are duplicated between `scripts/backfill-historical.js` and `worker/ingestion-worker.js` rather than shared — acceptable for two files, would be worth factoring out if a third consumer showed up.
+
+**Manual dry-run mode.** `node worker/ingestion-worker.js <jobType>` (e.g. `npm run worker -- sync_roster`) runs one job once against a real `DATABASE_URL` and exits, rather than starting the unattended scheduler — the same "test it by hand against real data before trusting it to run on its own" pattern `scripts/backfill-historical.js` was run with.
+
+**Deploy status:** code complete; Railway service `ingestion-worker` (already provisioned with `DATABASE_URL`/`REDIS_URL`, no public domain — matches the architecture above) still needs its `rootDirectory` set to `worker` and its GitHub source connected, same two-step pattern used for `web`. See the checklist for current status.
+
 ---
 
 ## 4.5 API surface (as built)

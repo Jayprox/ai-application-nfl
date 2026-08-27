@@ -9,7 +9,8 @@
     "seed": "node scripts/seed.js",
     "create-test-user": "node scripts/create-test-user.js",
     "backfill-historical": "node scripts/backfill-historical.js",
-    "cleanup-before-rerun": "node scripts/cleanup-before-rerun.js"
+    "cleanup-before-rerun": "node scripts/cleanup-before-rerun.js",
+    "worker": "node worker/ingestion-worker.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

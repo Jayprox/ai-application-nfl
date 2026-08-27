@@ -353,6 +353,29 @@ is actually built, not as it's planned.)*
       and Deploy.
 - [ ] Ingestion worker automation — turn the one-time seed into the real
       scheduled worker (fixed / proximity / game-window jobs)
+      *(Code done, deploy pending your `git push`. `worker/ingestion-worker.js`
+      replaces the old design-stage skeleton: the scheduler (all four
+      schedule shapes — fixed/proximity/day-of-week-proximity/game-window),
+      `ingestion_runs` logging, retry/backoff, and real identity resolution
+      (crosswalk lookup → name+team+position match → new-player fallback
+      flagged `manual_review`, per the original design doc) are all real.
+      `sync_roster`, `sync_schedule`, and `sync_historical_stats` are fully
+      implemented against nflverse's current-season files (same sources
+      `scripts/backfill-historical.js` used) with `ON CONFLICT DO UPDATE`
+      so scores/statuses/stat corrections actually land on a re-run, not
+      just first-insert like the one-time backfill. `sync_forecast_weather`
+      / `sync_injury_reports` / `sync_live_stats` still have real, firing
+      schedules but stubbed bodies — genuinely blocked on the still-open
+      live-stats vendor decision and an unprovisioned Open-Meteo key, not
+      skipped work. Added a manual dry-run mode
+      (`node worker/ingestion-worker.js <jobType>`) to test a job against
+      real data before trusting the unattended schedule, same pattern as
+      running the backfill script by hand. `worker/` is a self-contained
+      Railway service (own `package.json`) so it can get `rootDirectory:
+      worker`, same monorepo pattern as `web`. Full writeup in
+      `docs/architecture.md`'s new "Ingestion worker (as built)" section.
+      Next: push, then connect the already-provisioned `ingestion-worker`
+      Railway service to the repo and verify via its deploy logs.)*
 - [x] Deploy — live on Railway with a real URL.
       *(Done: `backend-api` (root of the repo, `node backend/server.js`)
       and a new `web` service (`frontend/`, Vite build + a small Express

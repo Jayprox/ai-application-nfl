@@ -1,0 +1,15 @@
+{
+  "name": "chalk-that-nfl-ingestion-worker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chalk That NFL — ingestion worker. Own Railway service (rootDirectory: worker), no public domain — see docs/architecture.md.",
+  "main": "ingestion-worker.js",
+  "scripts": {
+    "start": "node ingestion-worker.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "pg": "^8.12.0"
+  }
+}
