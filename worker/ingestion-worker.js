@@ -16,15 +16,26 @@
  *     scripts/backfill-historical.js used for the one-time historical
  *     load) and upsert, so rosters/scores/box-scores stay current as the
  *     season progresses instead of being frozen at backfill time.
- *   - sync_forecast_weather, sync_injury_reports, sync_live_stats remain
- *     STUBS. Their scheduling logic is real (proximity buckets / the
- *     Mon-Wed/Thu-Sat/Sun day-of-week cadence / the live game window all
- *     fire for real), but the fetch/normalize/upsert bodies are TODOs —
- *     each depends on a vendor decision that's still open (Open-Meteo key
- *     not provisioned; BallDontLie vs. Highlightly undecided — see
- *     docs/architecture.md's Cost & Vendors section). Wiring the
- *     scheduling now means only the vendor client + upsert need to be
- *     dropped in later, not the whole pipeline.
+ *   - sync_forecast_weather is now REAL too (Part 2 Phase 1 — see
+ *     docs/part2-roadmap.md). Open-Meteo's forecast endpoint needs no API
+ *     key for non-commercial use ("No API key is required. You can use it
+ *     immediately!" — open-meteo.com/en/about), so there was no credential
+ *     to provision after all — the `OPEN_METEO_API_KEY` env var this repo
+ *     used to mention was based on an assumption made before actually
+ *     integrating; it's unused and can be ignored/removed.
+ *   - sync_odds is now REAL too (The Odds API, free tier — see
+ *     docs/part2-roadmap.md's vendor decision). NOT YET DRY-RUN TESTED —
+ *     ODDS_API_KEY hasn't been provisioned anywhere yet, so this is
+ *     written against the vendor's documented API shape but hasn't run
+ *     against a real response. See the job body's own comment for the
+ *     specific things worth checking on the first real dry run.
+ *   - sync_injury_reports and sync_live_stats remain STUBS. Their
+ *     scheduling logic is real (the Mon-Wed/Thu-Sat/Sun day-of-week
+ *     cadence and the live game window both fire for real), but the
+ *     fetch/normalize/upsert bodies are TODOs — both depend on Highlightly
+ *     (the live-stats vendor decision — see docs/part2-roadmap.md).
+ *     Wiring the scheduling now means only the vendor client + upsert
+ *     need to be dropped in later, not the whole pipeline.
  *
  * This file is intentionally self-contained (its own worker/package.json,
  * its own copy of the small fetch/normalize helpers scripts/
@@ -496,22 +507,267 @@ async function syncHistoricalStats() {
 }
 
 // ---------------------------------------------------------------------
+// Job body — sync_forecast_weather, REAL (Open-Meteo). See file header:
+// no API key needed for this usage level.
+// ---------------------------------------------------------------------
+
+// Well inside Open-Meteo's 16-day forecast max — this job's proximity
+// schedule realistically only fires within a few days of the next
+// kickoff anyway, so there's no value forecasting further out than this.
+const OPEN_METEO_FORECAST_DAYS = 10;
+
+function openMeteoUrl(lat, lon) {
+  return (
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `&hourly=temperature_2m,windspeed_10m,weathercode` +
+    `&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=UTC&forecast_days=${OPEN_METEO_FORECAST_DAYS}`
+  );
+}
+
+// Collapses Open-Meteo's WMO `weathercode` into this app's
+// weather_condition_enum ('sunny' | 'overcast' | 'rain' | 'snow' | 'dome').
+// 'dome' is never returned here — dome/closed-roof games are already
+// classified 'dome' at schedule-sync time from nflverse's per-game roof
+// field (see classifyWeatherCondition above), so they never have a NULL
+// weather_condition for this job's query to pick up in the first place.
+function classifyOpenMeteoCode(code) {
+  if (code === 0) return 'sunny';
+  if (code === 1 || code === 2 || code === 3 || (code >= 45 && code <= 48)) return 'overcast';
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82) || (code >= 95 && code <= 99)) return 'rain';
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) return 'snow';
+  return 'overcast'; // unrecognized code — default to "not clear" rather than silently guessing 'sunny'
+}
+
+async function syncForecastWeather() {
+  const { rows: games } = await pool.query(
+    `SELECT g.game_id, g.game_datetime, s.latitude, s.longitude
+     FROM games g
+     JOIN stadiums s ON s.stadium_id = g.stadium_id
+     WHERE g.status = 'scheduled'
+       AND g.weather_condition IS NULL
+       AND g.game_datetime BETWEEN now() AND now() + ($1 || ' days')::interval`,
+    [OPEN_METEO_FORECAST_DAYS]
+  );
+
+  let processed = 0;
+  for (const game of games) {
+    let forecast;
+    try {
+      const text = await fetchText(openMeteoUrl(parseFloat(game.latitude), parseFloat(game.longitude)));
+      forecast = JSON.parse(text);
+    } catch (err) {
+      console.warn(`[job:sync_forecast_weather] fetch failed for game ${game.game_id} (${err.message})`);
+      continue;
+    }
+
+    const hourly = forecast.hourly;
+    if (!hourly || !Array.isArray(hourly.time) || !hourly.time.length) {
+      console.warn(`[job:sync_forecast_weather] no hourly data for game ${game.game_id}`);
+      continue;
+    }
+
+    // Open-Meteo returns `hourly.time` as UTC-local ISO strings (no offset
+    // suffix) when timezone=UTC is set — appending 'Z' makes that explicit
+    // before comparing against game_datetime.
+    const gameMs = new Date(game.game_datetime).getTime();
+    let closestIdx = 0;
+    let closestDiff = Infinity;
+    for (let i = 0; i < hourly.time.length; i++) {
+      const diff = Math.abs(new Date(hourly.time[i] + 'Z').getTime() - gameMs);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIdx = i;
+      }
+    }
+
+    const condition = classifyOpenMeteoCode(hourly.weathercode[closestIdx]);
+    await pool.query(
+      `UPDATE games SET weather_condition = $2, weather_temp_f = $3, weather_wind_mph = $4 WHERE game_id = $1`,
+      [game.game_id, condition, n(hourly.temperature_2m[closestIdx]), n(hourly.windspeed_10m[closestIdx])]
+    );
+    processed++;
+  }
+
+  console.log(`[job:sync_forecast_weather] ${processed} of ${games.length} eligible game(s) forecasted`);
+  return { recordsProcessed: processed };
+}
+
+// ---------------------------------------------------------------------
 // Job bodies — vendor-dependent, still stubs. See file header.
 // ---------------------------------------------------------------------
 
-async function syncForecastWeather() {
-  console.log('[job:sync_forecast_weather] skipped — Open-Meteo integration not yet built (fired on schedule; TODO once wired)');
-  return { recordsProcessed: 0 };
-}
-
 async function syncInjuryReports() {
-  console.log('[job:sync_injury_reports] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/architecture.md)');
+  console.log('[job:sync_injury_reports] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/part2-roadmap.md)');
   return { recordsProcessed: 0 };
 }
 
 async function syncLiveStats() {
-  console.log('[job:sync_live_stats] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/architecture.md)');
+  console.log('[job:sync_live_stats] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/part2-roadmap.md)');
   return { recordsProcessed: 0 };
+}
+
+// ---------------------------------------------------------------------
+// Job body — sync_odds, REAL (The Odds API — the-odds-api.com, free
+// tier). Part 2 Phase 1's highest-leverage data gap: without odds, no
+// agent can compare its own read on a matchup against what the market
+// already thinks (see docs/part2-roadmap.md).
+//
+// NOT yet dry-run tested against a live key — ODDS_API_KEY doesn't exist
+// anywhere yet (see .env.example). Written against The Odds API's
+// documented request/response shape (the-odds-api.com/liveapi/guides/v4/);
+// needs the same "run once manually against a real key before trusting
+// the scheduler" treatment every other job here got before this comment
+// can be removed. Likely first-run surprises, going in with eyes open:
+//   - Credit cost per call wasn't fully confirmed from the docs (looked
+//     to be per-market-per-region, not per-game, which would make this
+//     cheap — but that needs confirming against real usage once a key
+//     exists, not assumed).
+//   - Team-name matching (`teams.name` vs. the vendor's `home_team`/
+//     `away_team` strings) assumes exact string equality — nflverse's
+//     'LA'-vs-'LAR' abbreviation quirk (see architecture.md §3) was a
+//     reminder that vendor data doesn't always agree on naming; this
+//     hasn't been checked against The Odds API's actual team-name
+//     strings yet.
+// ---------------------------------------------------------------------
+
+const ODDS_API_BASE = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/odds/';
+const ODDS_MARKETS = ['h2h', 'spreads', 'totals'];
+
+function oddsApiUrl() {
+  const params = new URLSearchParams({
+    apiKey: process.env.ODDS_API_KEY,
+    regions: 'us',
+    markets: ODDS_MARKETS.join(','),
+    oddsFormat: 'american',
+  });
+  return `${ODDS_API_BASE}?${params.toString()}`;
+}
+
+// Resolves one odds-API game entry (home_team/away_team names +
+// commence_time) to our own game_id. Matches on team pair + a ±1-day
+// window around commence_time rather than an exact timestamp match, since
+// a flex-schedule change between when nflverse's schedule and this
+// vendor's commence_time were captured shouldn't cause a miss. Cached
+// per (team pair, commence_time) for the rest of this job run — mirrors
+// resolveIdentity()'s in-memory cache pattern, just for games instead of
+// players (not worth a persistent crosswalk table for this: unlike player
+// identity, which is looked up constantly across many jobs, this lookup
+// only ever needs to happen inside this one job).
+async function findGameForOddsEntry(entry, teamIdByName, cache) {
+  const cacheKey = `${entry.home_team}|${entry.away_team}|${entry.commence_time}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const homeTeamId = teamIdByName[entry.home_team];
+  const awayTeamId = teamIdByName[entry.away_team];
+  if (!homeTeamId || !awayTeamId) {
+    console.warn(`[job:sync_odds] no team match for "${entry.away_team}" @ "${entry.home_team}" — skipping`);
+    cache.set(cacheKey, null);
+    return null;
+  }
+
+  const { rows } = await pool.query(
+    `SELECT game_id FROM games
+     WHERE home_team_id = $1 AND away_team_id = $2
+       AND game_datetime BETWEEN $3::timestamptz - interval '1 day' AND $3::timestamptz + interval '1 day'
+     LIMIT 1`,
+    [homeTeamId, awayTeamId, entry.commence_time]
+  );
+  const gameId = rows[0]?.game_id || null;
+  if (!gameId) console.warn(`[job:sync_odds] no games row matched "${entry.away_team}" @ "${entry.home_team}" near ${entry.commence_time}`);
+  cache.set(cacheKey, gameId);
+  return gameId;
+}
+
+// Pairs a market's outcomes (The Odds API always returns both sides of a
+// market together) into the single row shape game_odds stores — see
+// 003_game_odds.sql for why one row covers both sides rather than one row
+// per outcome.
+function extractMarketRow(market, homeTeamName, awayTeamName) {
+  const row = {};
+  if (market.key === 'h2h') {
+    for (const o of market.outcomes || []) {
+      if (o.name === homeTeamName) row.homePrice = o.price;
+      else if (o.name === awayTeamName) row.awayPrice = o.price;
+    }
+  } else if (market.key === 'spreads') {
+    for (const o of market.outcomes || []) {
+      if (o.name === homeTeamName) { row.homePrice = o.price; row.homePoint = o.point; }
+      else if (o.name === awayTeamName) { row.awayPrice = o.price; row.awayPoint = o.point; }
+    }
+  } else if (market.key === 'totals') {
+    for (const o of market.outcomes || []) {
+      if (o.name === 'Over') { row.overPrice = o.price; row.totalPoint = o.point; }
+      else if (o.name === 'Under') { row.underPrice = o.price; row.totalPoint = o.point; }
+    }
+  }
+  return row;
+}
+
+async function syncOdds() {
+  if (!process.env.ODDS_API_KEY) {
+    console.warn('[job:sync_odds] ODDS_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+
+  let entries;
+  try {
+    const text = await fetchText(oddsApiUrl());
+    entries = JSON.parse(text);
+  } catch (err) {
+    console.warn(`[job:sync_odds] fetch failed (${err.message})`);
+    return { recordsProcessed: 0 };
+  }
+  if (!Array.isArray(entries)) {
+    // The Odds API returns an error object (not an array) on a bad key,
+    // exhausted quota, etc. — surface it plainly rather than crashing on
+    // an assumption that the response is always the happy-path array.
+    console.warn(`[job:sync_odds] unexpected response (not an array), skipping this run: ${JSON.stringify(entries).slice(0, 500)}`);
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: teams } = await pool.query('SELECT team_id, name FROM teams');
+  const teamIdByName = {};
+  for (const t of teams) teamIdByName[t.name] = t.team_id;
+
+  const gameCache = new Map();
+  const rowsToInsert = [];
+
+  for (const entry of entries) {
+    const gameId = await findGameForOddsEntry(entry, teamIdByName, gameCache);
+    if (!gameId) continue;
+
+    for (const bookmaker of entry.bookmakers || []) {
+      for (const market of bookmaker.markets || []) {
+        if (!ODDS_MARKETS.includes(market.key)) continue;
+        const parsed = extractMarketRow(market, entry.home_team, entry.away_team);
+        rowsToInsert.push({
+          gameId,
+          bookmaker: bookmaker.key,
+          market: market.key,
+          bookmakerLastUpdate: bookmaker.last_update || null,
+          ...parsed,
+        });
+      }
+    }
+  }
+
+  for (const r of rowsToInsert) {
+    await pool.query(
+      `INSERT INTO game_odds (
+         game_id, bookmaker, market, home_price, away_price, home_point, away_point,
+         over_price, under_price, total_point, bookmaker_last_update
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [
+        r.gameId, r.bookmaker, r.market,
+        n(r.homePrice), n(r.awayPrice), n(r.homePoint), n(r.awayPoint),
+        n(r.overPrice), n(r.underPrice), n(r.totalPoint),
+        r.bookmakerLastUpdate,
+      ]
+    );
+  }
+
+  console.log(`[job:sync_odds] ${rowsToInsert.length} odds row(s) recorded across ${entries.length} game(s) from the vendor`);
+  return { recordsProcessed: rowsToInsert.length };
 }
 
 // ---------------------------------------------------------------------
@@ -555,6 +811,20 @@ const JOBS = {
     source: 'live_stats_vendor',
     schedule: { type: 'game-window', pollSeconds: 20 },
     run: syncLiveStats,
+  },
+  sync_odds: {
+    source: 'the-odds-api',
+    // Reuses the same proximity shape as sync_forecast_weather — line
+    // movement matters most close to kickoff, same reasoning as weather.
+    schedule: {
+      type: 'proximity',
+      buckets: [
+        { hoursBefore: 72, intervalMinutes: 360 },
+        { hoursBefore: 12, intervalMinutes: 60 },
+        { hoursBefore: 0, intervalMinutes: 15 },
+      ],
+    },
+    run: syncOdds,
   },
 };
 

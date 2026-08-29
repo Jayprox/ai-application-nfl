@@ -42,7 +42,7 @@ These are the architectural decisions that should carry into NBA/MLB/WNAB versio
 
 The choices below are Chalk That NFL's answers to the platform patterns above — a future sport-app will make its own version of each.
 
-**Data sources.** Historical stats, career data, injury reports, and historical weather (already embedded in play-by-play): [nflverse](https://github.com/nflverse) — free, open, CC-BY-4.0. Forecast weather for upcoming games: Open-Meteo — free while building, ~$29/mo commercial tier once live. Current-season/live stats: still undecided, parked between BallDontLie and Highlightly. Sportsbook odds/props: deferred to a post-MVP phase entirely.
+**Data sources.** Historical stats, career data, injury reports, and historical weather (already embedded in play-by-play): [nflverse](https://github.com/nflverse) — free, open, CC-BY-4.0. Forecast weather for upcoming games: Open-Meteo — free, no API key needed at this usage level (confirmed once actually integrated; live and wired as of Part 2 Phase 1). Current-season/live stats + injuries: **Highlightly** (highlightly.net), free tier — decided over BallDontLie, whose free tier only covers teams/games; not yet wired (`sync_injury_reports`/`sync_live_stats` still stubs). Sportsbook odds/props: **The Odds API** (the-odds-api.com), free tier — built (`sync_odds` job, `game_odds` table) but not yet dry-run tested against a real key. See `docs/part2-roadmap.md` for the full Part 2 data-vendor decision and status.
 
 **Known nflverse quirk — team abbreviation drift.** nflverse's own files don't agree with each other on the Los Angeles Rams' abbreviation: `games.csv` (and the player-stats/roster release files) use `'LA'`, while every other nflverse source and our own `teams` table use `'LAR'`. Confirmed by diffing `games.csv` against our 32 real abbreviations for the 2021-2026 range — `'LA'` was the only mismatch found. Any code that joins nflverse data against `teams` by abbreviation (the one-time historical backfill today, `ingestion-worker` once it exists) needs a small alias/normalization step (`{ LA: 'LAR' }`) before doing that lookup, or Rams rows silently fail to match and — worse — get skipped upstream in a way that can cascade into foreign-key failures downstream (this exact chain is what broke the first historical backfill run; see `scripts/backfill-historical.js`).
 
@@ -110,7 +110,7 @@ graph TB
 | Service | Needs |
 |---|---|
 | `backend-api` | `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `CORS_ORIGIN` (the deployed React web URL, once it has one) |
-| `ingestion-worker` | `DATABASE_URL`, `REDIS_URL`, `OPEN_METEO_API_KEY`, `LIVE_STATS_VENDOR_API_KEY` (once chosen) |
+| `ingestion-worker` | `DATABASE_URL`, `REDIS_URL`, `ODDS_API_KEY` (not yet provisioned — `sync_odds` no-ops without it), `HIGHLIGHTLY_API_KEY` (not yet needed — `sync_injury_reports`/`sync_live_stats` not wired yet). No key needed for weather — Open-Meteo turned out not to require one. |
 | React web | `VITE_API_URL` (build-time — Vite only exposes `VITE_`-prefixed vars to client code) |
 
 `JWT_SECRET` only ever needs to exist on `backend-api` — it's the only service verifying tokens; `ingestion-worker` never authenticates incoming requests, so it never needs it.
@@ -211,4 +211,4 @@ The StatMuse-style search bar — designed conceptually now, not yet scaffolded 
 
 ## 6. Still open
 
-Current-season/live-stats vendor (BallDontLie vs. Highlightly) — parked, not blocking anything designed so far. Sportsbook odds/props integration — deferred past MVP entirely. The NL query layer above is designed but not yet scaffolded in code. Auth details (username-based login, email verification backlog) are covered in §4.5.
+Part 2 (agent team) data-vendor decisions are made — Highlightly for live stats/injuries, The Odds API for odds — but not fully wired; see `docs/part2-roadmap.md` for exact status (`sync_odds` built but untested, `sync_injury_reports`/`sync_live_stats` not started). The NL query layer above is designed but not yet scaffolded in code. Auth details (username-based login, email verification backlog) are covered in §4.5.
