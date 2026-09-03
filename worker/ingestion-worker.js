@@ -23,19 +23,25 @@
  *     to provision after all — the `OPEN_METEO_API_KEY` env var this repo
  *     used to mention was based on an assumption made before actually
  *     integrating; it's unused and can be ignored/removed.
- *   - sync_odds is now REAL too (The Odds API, free tier — see
- *     docs/part2-roadmap.md's vendor decision). NOT YET DRY-RUN TESTED —
- *     ODDS_API_KEY hasn't been provisioned anywhere yet, so this is
- *     written against the vendor's documented API shape but hasn't run
- *     against a real response. See the job body's own comment for the
- *     specific things worth checking on the first real dry run.
- *   - sync_injury_reports and sync_live_stats remain STUBS. Their
- *     scheduling logic is real (the Mon-Wed/Thu-Sat/Sun day-of-week
- *     cadence and the live game window both fire for real), but the
- *     fetch/normalize/upsert bodies are TODOs — both depend on Highlightly
- *     (the live-stats vendor decision — see docs/part2-roadmap.md).
- *     Wiring the scheduling now means only the vendor client + upsert
- *     need to be dropped in later, not the whole pipeline.
+ *   - sync_odds is REAL and dry-run confirmed (The Odds API — 1508 odds
+ *     rows across 272 games on the first real run, both locally and on
+ *     Railway). See docs/part2-roadmap.md's vendor decision.
+ *   - sync_injury_reports and sync_live_stats are now REAL too
+ *     (Highlightly — highlightly.net via RapidAPI, the live-stats vendor
+ *     decision, see docs/part2-roadmap.md). NOT YET DRY-RUN TESTED —
+ *     HIGHLIGHTLY_API_KEY was only just provisioned. Written against
+ *     Highlightly's documented request/response shape, which is a
+ *     paraphrase of their docs page rather than a captured real response —
+ *     see the job bodies' own comment for exactly what's confirmed vs.
+ *     best-effort-guessed (particularly sync_live_stats's stat-name
+ *     mapping), and what the first real dry run needs to check.
+ *   - grade_picks is REAL (Part 2 Phase 2's calibration/tracking layer —
+ *     see docs/part2-roadmap.md "3 paths" discussion). Grades picks_log
+ *     rows (db/migrations/004_picks_log.sql) against final games once an
+ *     hour and logs the all-time hit rate. No agent writes to picks_log
+ *     yet — scripts/seed-test-picks.js is the only writer for now, used
+ *     to validate this job against real 2021-2025 historical games
+ *     before any agent depends on it.
  *
  * This file is intentionally self-contained (its own worker/package.json,
  * its own copy of the small fetch/normalize helpers scripts/
@@ -96,15 +102,23 @@ pool.on('error', (err) => {
 // Fetch helpers (same shape as scripts/backfill-historical.js)
 // ---------------------------------------------------------------------
 
-function fetchText(url) {
+// `extraHeaders` lets vendor clients that need auth headers (Highlightly's
+// x-rapidapi-key/x-rapidapi-host) reuse this same fetch/redirect/error
+// handling instead of duplicating it — fetchText() below is just this with
+// no extra headers, which is all the nflverse/Open-Meteo/Odds-API callers
+// ever needed.
+function fetchTextWithHeaders(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     https
-      .get(url, { headers: { 'User-Agent': 'chalk-that-nfl-ingestion-worker' } }, (res) => {
+      .get(url, { headers: { 'User-Agent': 'chalk-that-nfl-ingestion-worker', ...extraHeaders } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return resolve(fetchText(res.headers.location));
+          return resolve(fetchTextWithHeaders(res.headers.location, extraHeaders));
         }
         if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+          let body = '';
+          res.on('data', (chunk) => (body += chunk));
+          res.on('end', () => reject(new Error(`HTTP ${res.statusCode} for ${url}: ${body.slice(0, 300)}`)));
+          return;
         }
         let data = '';
         res.on('data', (chunk) => (data += chunk));
@@ -112,6 +126,10 @@ function fetchText(url) {
       })
       .on('error', reject);
   });
+}
+
+function fetchText(url) {
+  return fetchTextWithHeaders(url);
 }
 
 async function fetchCsv(url) {
@@ -593,17 +611,423 @@ async function syncForecastWeather() {
 }
 
 // ---------------------------------------------------------------------
-// Job bodies — vendor-dependent, still stubs. See file header.
+// Job bodies — sync_injury_reports / sync_live_stats, Highlightly
+// (highlightly.net via RapidAPI, host nfl-ncaa-highlights-api). Part 2
+// Phase 1's live-stats vendor decision — see docs/part2-roadmap.md.
+//
+// NOT yet dry-run tested against a live key — HIGHLIGHTLY_API_KEY was
+// only just provisioned. Written against Highlightly's documented
+// request/response shape (highlightly.net/nfl-api/documentation/), which
+// is itself a paraphrase of their docs page rather than a captured real
+// response, so treat field names below as a best guess pending the first
+// real dry run, not a confirmed contract — same "run it for real before
+// trusting it" step every other vendor job here needed. Specifically:
+//   - /matches and /matches/{id} (injuries) — the shape (team block ->
+//     data[] -> {status, player:{name,jersey,position}}) is reasonably
+//     confirmed from the docs' own example payload. NOT confirmed:
+//     whether Highlightly's status strings line up with this app's
+//     injury_report_status_enum, or whether there's a practice-status /
+//     injury-description field at all — INJURY_STATUS_MAP only handles
+//     the values the docs showed, and unrecognized ones are logged
+//     (once) and left NULL rather than guessed.
+//   - /box-score/{matchId} — only ONE example stat ({group:"Passing",
+//     name:"Total Successful Passes"}) was confirmed from the docs;
+//     the rest of STAT_FIELD_MAP is an educated guess at Highlightly's
+//     naming convention. syncLiveStats logs any (group, name) pair it
+//     doesn't recognize (once per pair) so the first live dry run,
+//     during an actual game window, surfaces the real vocabulary to
+//     correct this against.
+//   - Player identity: injuries only give a name (no stable per-vendor
+//     player id), so those match by name+team against `players` with NO
+//     crosswalk and are SKIPPED (not inserted) on a 0 or >1 candidate
+//     match. Box-score entries do carry a per-vendor player id, so those
+//     go through a crosswalk (source='highlightly') — but neither path
+//     inserts a new players row the way resolveIdentity() does for
+//     nflverse data, because neither Highlightly response includes a
+//     usable position, and a miss here is more likely a name-format
+//     mismatch (or an unresolved roster move) than a genuinely new
+//     player; better to skip and let sync_roster catch up than to mint
+//     player records with no position from a job that polls every
+//     minute during a live game.
 // ---------------------------------------------------------------------
 
+const HIGHLIGHTLY_HOST = 'nfl-ncaa-highlights-api.p.rapidapi.com';
+const HIGHLIGHTLY_BASE = `https://${HIGHLIGHTLY_HOST}`;
+
+async function fetchHighlightly(path, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null)
+  ).toString();
+  const url = `${HIGHLIGHTLY_BASE}${path}${query ? `?${query}` : ''}`;
+  const text = await fetchTextWithHeaders(url, {
+    'x-rapidapi-key': process.env.HIGHLIGHTLY_API_KEY,
+    'x-rapidapi-host': HIGHLIGHTLY_HOST,
+  });
+  return JSON.parse(text);
+}
+
+async function loadTeamNameMap() {
+  const { rows } = await pool.query('SELECT team_id, name, abbreviation FROM teams');
+  const idByName = {};
+  const abbrByTeamId = {};
+  for (const t of rows) {
+    idByName[t.name] = t.team_id;
+    abbrByTeamId[t.team_id] = t.abbreviation;
+  }
+  return { idByName, abbrByTeamId };
+}
+
+// Resolves one of our `games` rows to Highlightly's numeric match id, by
+// date + team abbreviation (their documented /matches filters). Tries the
+// game's UTC date first, then ±1 day — same tolerance idea as
+// findGameForOddsEntry's ±1 day window, in case Highlightly buckets a
+// late-kickoff game under a different calendar date than we do. Cached
+// per game_id for the rest of this job run (shared by both jobs below,
+// since both need the same match id).
+async function findHighlightlyMatch(game, abbrByTeamId, cache) {
+  if (cache.has(game.game_id)) return cache.get(game.game_id);
+
+  const homeAbbr = abbrByTeamId[game.home_team_id];
+  const awayAbbr = abbrByTeamId[game.away_team_id];
+  if (!homeAbbr || !awayAbbr) {
+    cache.set(game.game_id, null);
+    return null;
+  }
+
+  const kickoff = new Date(game.game_datetime);
+  const dateCandidates = [0, -1, 1].map((offset) => {
+    const d = new Date(kickoff);
+    d.setUTCDate(d.getUTCDate() + offset);
+    return d.toISOString().slice(0, 10);
+  });
+
+  for (const date of dateCandidates) {
+    let payload;
+    try {
+      payload = await fetchHighlightly('/matches', {
+        date, league: 'NFL', homeTeamAbbreviation: homeAbbr, awayTeamAbbreviation: awayAbbr, limit: 5,
+      });
+    } catch (err) {
+      console.warn(`[highlightly] /matches lookup failed for ${awayAbbr}@${homeAbbr} on ${date} (${err.message})`);
+      continue;
+    }
+    const matches = Array.isArray(payload) ? payload : payload?.data || [];
+    if (matches.length) {
+      cache.set(game.game_id, matches[0].id);
+      return matches[0].id;
+    }
+  }
+
+  console.warn(`[highlightly] no match found for ${awayAbbr}@${homeAbbr} near ${game.game_datetime}`);
+  cache.set(game.game_id, null);
+  return null;
+}
+
+// See file header — only 'questionable' is confirmed from Highlightly's
+// docs example; the rest are a best guess at their vocabulary.
+const INJURY_STATUS_MAP = {
+  questionable: 'questionable',
+  doubtful: 'doubtful',
+  out: 'out',
+  'injured reserve': 'injured_reserve',
+  ir: 'injured_reserve',
+  probable: 'probable',
+  active: 'active',
+};
+const unrecognizedInjuryStatuses = new Set();
+
+function mapInjuryStatus(raw) {
+  if (!raw) return null;
+  const key = String(raw).trim().toLowerCase();
+  const mapped = INJURY_STATUS_MAP[key];
+  if (!mapped && !unrecognizedInjuryStatuses.has(key)) {
+    unrecognizedInjuryStatuses.add(key);
+    console.warn(`[job:sync_injury_reports] unrecognized status "${raw}" — leaving report_status NULL for this row`);
+  }
+  return mapped || null;
+}
+
+// Name+team match against `players`. See file header re: why this does
+// NOT insert a new player the way resolveIdentity() does.
+async function findPlayerIdByName(fullName, teamId, cache) {
+  const cacheKey = `${fullName}|${teamId}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const { rows } = await pool.query(
+    `SELECT player_id FROM players WHERE lower(full_name) = lower($1) AND current_team_id = $2 LIMIT 2`,
+    [fullName, teamId]
+  );
+  const playerId = rows.length === 1 ? rows[0].player_id : null;
+  if (!playerId) {
+    console.warn(
+      `[job:sync_injury_reports] ${rows.length === 0 ? 'no' : 'ambiguous'} player match for "${fullName}" (team_id ${teamId}) — skipping`
+    );
+  }
+  cache.set(cacheKey, playerId);
+  return playerId;
+}
+
 async function syncInjuryReports() {
-  console.log('[job:sync_injury_reports] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/part2-roadmap.md)');
-  return { recordsProcessed: 0 };
+  if (!process.env.HIGHLIGHTLY_API_KEY) {
+    console.warn('[job:sync_injury_reports] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: games } = await pool.query(
+    `SELECT game_id, season, week, home_team_id, away_team_id, game_datetime
+     FROM games
+     WHERE status = 'scheduled' AND game_datetime BETWEEN now() AND now() + interval '8 days'`
+  );
+  if (!games.length) {
+    console.log('[job:sync_injury_reports] no upcoming games in the next 8 days');
+    return { recordsProcessed: 0 };
+  }
+
+  const { abbrByTeamId } = await loadTeamNameMap();
+  const matchCache = new Map();
+  const playerCache = new Map();
+  const today = new Date().toISOString().slice(0, 10);
+  let processed = 0;
+
+  for (const game of games) {
+    const matchId = await findHighlightlyMatch(game, abbrByTeamId, matchCache);
+    if (!matchId) continue;
+
+    let detail;
+    try {
+      detail = await fetchHighlightly(`/matches/${matchId}`);
+    } catch (err) {
+      console.warn(`[job:sync_injury_reports] /matches/${matchId} fetch failed for game ${game.game_id} (${err.message})`);
+      continue;
+    }
+
+    for (const teamBlock of detail.injuries || []) {
+      const blockAbbr = teamBlock.team?.abbreviation;
+      const teamId =
+        blockAbbr === abbrByTeamId[game.home_team_id] ? game.home_team_id :
+        blockAbbr === abbrByTeamId[game.away_team_id] ? game.away_team_id :
+        null;
+      if (!teamId) {
+        console.warn(`[job:sync_injury_reports] injury block team "${blockAbbr}" didn't match either side of game ${game.game_id}`);
+        continue;
+      }
+
+      for (const entry of teamBlock.data || []) {
+        const fullName = entry.player?.name;
+        if (!fullName) continue;
+        const playerId = await findPlayerIdByName(fullName, teamId, playerCache);
+        if (!playerId) continue;
+
+        // Avoid piling up identical rows every time this job's
+        // day-of-week-proximity cadence fires again within the same
+        // calendar day — only insert if today's latest row for this
+        // player differs (or doesn't exist yet). Still a real time
+        // series across days, just not re-stamped on every unchanged poll.
+        const { rows: existing } = await pool.query(
+          `SELECT report_status, primary_injury FROM injury_reports
+           WHERE player_id = $1 AND report_date = $2
+           ORDER BY created_at DESC LIMIT 1`,
+          [playerId, today]
+        );
+        const reportStatus = mapInjuryStatus(entry.status);
+        const primaryInjury = entry.injury || entry.description || null;
+        if (existing.length && existing[0].report_status === reportStatus && existing[0].primary_injury === primaryInjury) {
+          continue;
+        }
+
+        await pool.query(
+          `INSERT INTO injury_reports (player_id, team_id, season, week, report_date, report_status, primary_injury)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [playerId, teamId, game.season, game.week, today, reportStatus, primaryInjury]
+        );
+        processed++;
+      }
+    }
+  }
+
+  console.log(`[job:sync_injury_reports] ${processed} injury row(s) recorded across ${games.length} upcoming game(s)`);
+  return { recordsProcessed: processed };
+}
+
+// Box-score stat (group, name) -> our upsertOffense/Defense/StBatch column
+// name + bucket. Keys are lowercased "group|name". See file header — only
+// the 'passing|total successful passes' entry is confirmed; the rest are
+// a best-effort guess pending a real dry run.
+const STAT_FIELD_MAP = {
+  'passing|total successful passes': { bucket: 'offense', col: 'completions' },
+  'passing|pass attempts': { bucket: 'offense', col: 'attempts' },
+  'passing|passing attempts': { bucket: 'offense', col: 'attempts' },
+  'passing|passing yards': { bucket: 'offense', col: 'passing_yards' },
+  'passing|passing touchdowns': { bucket: 'offense', col: 'passing_tds' },
+  'passing|interceptions thrown': { bucket: 'offense', col: 'passing_interceptions' },
+  'passing|sacks taken': { bucket: 'offense', col: 'sacks_suffered' },
+  'rushing|rushing attempts': { bucket: 'offense', col: 'carries' },
+  'rushing|carries': { bucket: 'offense', col: 'carries' },
+  'rushing|rushing yards': { bucket: 'offense', col: 'rushing_yards' },
+  'rushing|rushing touchdowns': { bucket: 'offense', col: 'rushing_tds' },
+  'rushing|fumbles lost': { bucket: 'offense', col: 'fumbles_lost_total' },
+  'receiving|targets': { bucket: 'offense', col: 'targets' },
+  'receiving|receptions': { bucket: 'offense', col: 'receptions' },
+  'receiving|receiving yards': { bucket: 'offense', col: 'receiving_yards' },
+  'receiving|receiving touchdowns': { bucket: 'offense', col: 'receiving_tds' },
+  'defense|solo tackles': { bucket: 'defense', col: 'def_tackles_solo' },
+  'defense|assisted tackles': { bucket: 'defense', col: 'def_tackles_with_assist' },
+  'defense|sacks': { bucket: 'defense', col: 'def_sacks' },
+  'defense|tackles for loss': { bucket: 'defense', col: 'def_tackles_for_loss' },
+  'defense|qb hits': { bucket: 'defense', col: 'def_qb_hits' },
+  'defense|interceptions': { bucket: 'defense', col: 'def_interceptions' },
+  'defense|passes defended': { bucket: 'defense', col: 'def_pass_defended' },
+  'defense|forced fumbles': { bucket: 'defense', col: 'def_fumbles_forced' },
+  'defense|fumble recoveries': { bucket: 'defense', col: 'def_fumbles' },
+  'defense|defensive touchdowns': { bucket: 'defense', col: 'def_tds' },
+  'special teams|field goals attempted': { bucket: 'special_teams', col: 'fg_att' },
+  'special teams|field goals made': { bucket: 'special_teams', col: 'fg_made' },
+  'special teams|extra points attempted': { bucket: 'special_teams', col: 'pat_att' },
+  'special teams|extra points made': { bucket: 'special_teams', col: 'pat_made' },
+  'special teams|kickoff return yards': { bucket: 'special_teams', col: 'kickoff_return_yards' },
+  'special teams|punt return yards': { bucket: 'special_teams', col: 'punt_return_yards' },
+  'special teams|special teams touchdowns': { bucket: 'special_teams', col: 'special_teams_tds' },
+};
+const unrecognizedStatKeys = new Set();
+
+async function getLiveGames() {
+  const { rows } = await pool.query(
+    `SELECT game_id, home_team_id, away_team_id, game_datetime FROM games
+     WHERE now() BETWEEN game_datetime AND game_datetime + interval '4 hours'`
+  );
+  return rows;
+}
+
+// Box-score player resolution: unlike resolveIdentity(), this does NOT
+// insert a new players row on an ambiguous/missing name match (no
+// position data is available here to disambiguate — see file header).
+// Does still write the crosswalk on a confident match, so repeat polls
+// during a live game hit the crosswalk instead of re-matching by name
+// every minute.
+async function resolvePlayerForBoxScore(vendorPlayerId, fullName, teamId, cache) {
+  const cacheKey = String(vendorPlayerId);
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const { rows: crosswalked } = await pool.query(
+    `SELECT player_id FROM player_id_crosswalk WHERE source = 'highlightly' AND source_player_id = $1`,
+    [cacheKey]
+  );
+  if (crosswalked.length) {
+    cache.set(cacheKey, crosswalked[0].player_id);
+    return crosswalked[0].player_id;
+  }
+
+  const { rows: matches } = await pool.query(
+    `SELECT player_id FROM players WHERE lower(full_name) = lower($1) AND current_team_id = $2 LIMIT 2`,
+    [fullName, teamId]
+  );
+  if (matches.length !== 1) {
+    console.warn(
+      `[job:sync_live_stats] ${matches.length === 0 ? 'no' : 'ambiguous'} player match for "${fullName}" (team_id ${teamId}) — skipping this stat line`
+    );
+    cache.set(cacheKey, null);
+    return null;
+  }
+
+  const playerId = matches[0].player_id;
+  await pool.query(
+    `INSERT INTO player_id_crosswalk (player_id, source, source_player_id, match_confidence)
+     VALUES ($1, 'highlightly', $2, 'matched') ON CONFLICT (source, source_player_id) DO NOTHING`,
+    [playerId, cacheKey]
+  );
+  cache.set(cacheKey, playerId);
+  return playerId;
 }
 
 async function syncLiveStats() {
-  console.log('[job:sync_live_stats] skipped — live-stats vendor undecided (BallDontLie vs. Highlightly, see docs/part2-roadmap.md)');
-  return { recordsProcessed: 0 };
+  if (!process.env.HIGHLIGHTLY_API_KEY) {
+    console.warn('[job:sync_live_stats] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+
+  const games = await getLiveGames();
+  if (!games.length) return { recordsProcessed: 0 };
+
+  const { idByName, abbrByTeamId } = await loadTeamNameMap();
+  const matchCache = new Map();
+  const identityCache = new Map();
+
+  // Keyed by `${gameId}|${playerId}` so multiple stat lines for the same
+  // player within one box score merge into a single upsert row instead of
+  // one query per stat.
+  const offenseRows = {}, defenseRows = {}, stRows = {};
+  function rowFor(store, gameId, playerId, teamId) {
+    const key = `${gameId}|${playerId}`;
+    if (!store[key]) store[key] = { row: { game_id: gameId }, playerId, teamId };
+    return store[key].row;
+  }
+
+  let processed = 0;
+
+  for (const game of games) {
+    const matchId = await findHighlightlyMatch(game, abbrByTeamId, matchCache);
+    if (!matchId) continue;
+
+    let boxScore;
+    try {
+      boxScore = await fetchHighlightly(`/box-score/${matchId}`);
+    } catch (err) {
+      console.warn(`[job:sync_live_stats] /box-score/${matchId} fetch failed for game ${game.game_id} (${err.message})`);
+      continue;
+    }
+    if (!Array.isArray(boxScore)) {
+      console.warn(`[job:sync_live_stats] unexpected /box-score/${matchId} response shape, skipping`);
+      continue;
+    }
+
+    const usedTeamIds = new Set();
+    for (const teamBlock of boxScore) {
+      const teamName = teamBlock.team?.name;
+      let teamId = idByName[teamName];
+      if (!teamId) {
+        // Fallback: only two possible teams for this game — assign
+        // whichever side hasn't been claimed yet by the other block.
+        teamId = [game.home_team_id, game.away_team_id].find((id) => !usedTeamIds.has(id)) || null;
+      }
+      if (!teamId) {
+        console.warn(`[job:sync_live_stats] couldn't match box-score team "${teamName}" to game ${game.game_id}`);
+        continue;
+      }
+      usedTeamIds.add(teamId);
+
+      for (const entry of teamBlock.team?.boxScores || []) {
+        const vendorPlayerId = entry.player?.id;
+        const fullName = entry.player?.name;
+        if (!vendorPlayerId || !fullName) continue;
+
+        const playerId = await resolvePlayerForBoxScore(vendorPlayerId, fullName, teamId, identityCache);
+        if (!playerId) continue;
+
+        for (const stat of entry.statistics || []) {
+          const mapKey = `${(stat.group || '').trim().toLowerCase()}|${(stat.name || '').trim().toLowerCase()}`;
+          const mapped = STAT_FIELD_MAP[mapKey];
+          if (!mapped) {
+            if (!unrecognizedStatKeys.has(mapKey)) {
+              unrecognizedStatKeys.add(mapKey);
+              console.warn(`[job:sync_live_stats] unrecognized stat "${stat.group} / ${stat.name}" — not recorded (see STAT_FIELD_MAP)`);
+            }
+            continue;
+          }
+          const store = mapped.bucket === 'offense' ? offenseRows : mapped.bucket === 'defense' ? defenseRows : stRows;
+          const row = rowFor(store, game.game_id, playerId, teamId);
+          row[mapped.col] = stat.value;
+        }
+        processed++;
+      }
+    }
+  }
+
+  await upsertOffenseBatch(Object.values(offenseRows));
+  await upsertDefenseBatch(Object.values(defenseRows));
+  await upsertStBatch(Object.values(stRows));
+
+  console.log(`[job:sync_live_stats] ${processed} player-line(s) updated across ${games.length} live game(s)`);
+  return { recordsProcessed: processed };
 }
 
 // ---------------------------------------------------------------------
@@ -771,6 +1195,116 @@ async function syncOdds() {
 }
 
 // ---------------------------------------------------------------------
+// grade_picks — calibration/tracking layer (Part 2 Phase 2, "3 paths"
+// discussion — see docs/part2-roadmap.md). Grades any picks_log row
+// whose linked game has gone final: looks up the actual stat value,
+// compares it to the pick's line/direction, and writes back status +
+// actual_value. Doesn't care who or what inserted the pick (a future
+// agent, or scripts/seed-test-picks.js for now) — this is purely "given
+// a claim and a fact, was the claim right." No external vendor call, so
+// unlike every other job here it only ever touches our own tables.
+// ---------------------------------------------------------------------
+
+// stat_category -> which *_game_stats table/column(s) hold the actual
+// value. Deliberately the same categories backend/lib/insights.js's
+// POSITION_STAT_MAP / DEFENSE_STAT already key off of (passing/rushing/
+// receiving yards from player_offense_game_stats, combined tackles from
+// player_defense_game_stats) — see 004_picks_log.sql's header for why
+// this table is scoped to player-stat picks only, not game lines.
+// tackles COALESCEs both columns to 0 rather than leaving the SQL sum
+// NULL-poisoned if either side wasn't reported — see gradePendingPicks's
+// void-detection, which relies on "no row at all" (not "a null column")
+// meaning ungradeable for this expression.
+const STAT_CATEGORY_MAP = {
+  passing_yards: { table: 'player_offense_game_stats', expr: 'passing_yards' },
+  rushing_yards: { table: 'player_offense_game_stats', expr: 'rushing_yards' },
+  receiving_yards: { table: 'player_offense_game_stats', expr: 'receiving_yards' },
+  tackles: { table: 'player_defense_game_stats', expr: '(COALESCE(tackles_solo, 0) + COALESCE(tackles_assist, 0))' },
+};
+
+async function gradePendingPicks() {
+  const { rows: pending } = await pool.query(
+    `SELECT pl.pick_id, pl.game_id, pl.player_id, pl.stat_category, pl.predicted_direction, pl.predicted_line
+     FROM picks_log pl
+     JOIN games g ON g.game_id = pl.game_id
+     WHERE pl.status = 'pending' AND g.status = 'final'`
+  );
+
+  if (!pending.length) {
+    console.log('[job:grade_picks] no pending picks with a final game — nothing to grade');
+    return { recordsProcessed: 0 };
+  }
+
+  let graded = 0;
+  const tallies = { correct: 0, incorrect: 0, push: 0, void: 0 };
+
+  for (const pick of pending) {
+    const statConfig = STAT_CATEGORY_MAP[pick.stat_category];
+    if (!statConfig) {
+      // Left 'pending' on purpose, not voided — an unrecognized category
+      // means STAT_CATEGORY_MAP is missing an entry (a bug on our side),
+      // not that the pick is ungradeable. Fix the map and the next run
+      // picks it back up.
+      console.warn(`[job:grade_picks] pick ${pick.pick_id}: unrecognized stat_category "${pick.stat_category}" — skipping (see STAT_CATEGORY_MAP)`);
+      continue;
+    }
+
+    const { rows } = await pool.query(
+      `SELECT ${statConfig.expr} AS actual_value FROM ${statConfig.table} WHERE game_id = $1 AND player_id = $2`,
+      [pick.game_id, pick.player_id]
+    );
+
+    let status;
+    let actualValue = null;
+    if (!rows.length || rows[0].actual_value === null) {
+      // Game is final but this player has no stat row for it (or an
+      // unexpectedly null column on a single-stat category) — inactive,
+      // DNP, or a vendor gap. Can't be graded correct/incorrect, and
+      // shouldn't sit 'pending' forever waiting for a stat that will
+      // never arrive.
+      status = 'void';
+    } else {
+      actualValue = Number(rows[0].actual_value);
+      if (actualValue === Number(pick.predicted_line)) {
+        status = 'push';
+      } else if (pick.predicted_direction === 'over') {
+        status = actualValue > pick.predicted_line ? 'correct' : 'incorrect';
+      } else {
+        status = actualValue < pick.predicted_line ? 'correct' : 'incorrect';
+      }
+    }
+
+    await pool.query(
+      `UPDATE picks_log SET status = $2, actual_value = $3, graded_at = now() WHERE pick_id = $1`,
+      [pick.pick_id, status, actualValue]
+    );
+    tallies[status] = (tallies[status] || 0) + 1;
+    graded++;
+  }
+
+  // All-time hit rate (not just this run) so it's visible in Railway logs
+  // after every scheduled fire, same "computes hit rate" ask this job
+  // exists to satisfy. Pushes and voids are excluded from the
+  // denominator — same convention as a sportsbook hold calculation — so
+  // a batch of ungradeable picks doesn't quietly deflate it.
+  const { rows: hitRateRows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE status = 'correct') AS correct,
+            COUNT(*) FILTER (WHERE status = 'incorrect') AS incorrect
+     FROM picks_log`
+  );
+  const { correct, incorrect } = hitRateRows[0];
+  const decided = Number(correct) + Number(incorrect);
+  const hitRate = decided > 0 ? `${((Number(correct) / decided) * 100).toFixed(1)}%` : 'n/a';
+
+  console.log(
+    `[job:grade_picks] graded ${graded} pick(s) this run ` +
+      `(${tallies.correct} correct, ${tallies.incorrect} incorrect, ${tallies.push} push, ${tallies.void} void) — ` +
+      `all-time hit rate: ${hitRate} (${correct}/${decided} decided)`
+  );
+  return { recordsProcessed: graded };
+}
+
+// ---------------------------------------------------------------------
 // Job registry
 // ---------------------------------------------------------------------
 
@@ -825,6 +1359,11 @@ const JOBS = {
       ],
     },
     run: syncOdds,
+  },
+  grade_picks: {
+    source: 'internal', // grades our own picks_log against our own games/stats — no vendor call
+    schedule: { type: 'fixed', intervalMinutes: 60 },
+    run: gradePendingPicks,
   },
 };
 

@@ -17,6 +17,9 @@ const authRoutes = require('./routes/auth');
 const teamRoutes = require('./routes/teams');
 const playerRoutes = require('./routes/players');
 const queryRoutes = require('./routes/query');
+const insightsRoutes = require('./routes/insights');
+const oddsRoutes = require('./routes/odds');
+const picksRoutes = require('./routes/picks');
 
 const app = express();
 app.use(express.json());
@@ -58,6 +61,19 @@ app.use(authenticate);
 app.use('/teams', teamRoutes);
 app.use('/players', playerRoutes);
 app.use('/query', queryRoutes);
+// Part 2 Phase 1's deterministic insight layer (docs/part2-roadmap.md) —
+// deliberately separate from /query, which does "no predictive
+// calculations" (architecture.md §2). See routes/insights.js and
+// lib/insights.js for the label/note rules engine.
+app.use('/insights', insightsRoutes);
+// Sportsbook odds (The Odds API via worker's sync_odds job) — see
+// routes/odds.js for why this is its own route rather than folded into
+// /query or /insights.
+app.use('/odds', oddsRoutes);
+// Calibration/tracking layer (Part 2 Phase 2, "3 paths" discussion) — the
+// picks_log read view. See routes/picks.js and worker/ingestion-worker.js's
+// grade_picks job for the write path.
+app.use('/picks', picksRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
