@@ -123,18 +123,30 @@ async function getEligiblePlayers() {
   return rows;
 }
 
+// A real NFL active roster is ~2,500-3,000+ players once special teams
+// is excluded (confirmed against live data: status='ACT' alone is 3,301).
+// Each one needs ~10 sequential DB round trips (computePlayerInsights()'s
+// four categories do 3+1+4+1 queries between them, plus the next-game
+// lookup and the upsert) — fully serial, that's 25,000+ round trips,
+// measured to take long enough for a non-local DATABASE_URL connection
+// to drop mid-run. CONCURRENCY caps how many players are in flight at
+// once rather than either full-serial (too slow) or firing all ~3,000 at
+// once (would just overwhelm backend/db.js's pg Pool, which defaults to
+// max 10 connections, and end up serializing anyway).
+const CONCURRENCY = 8;
+
 async function computeAndStoreMatchupScores(season) {
   const players = await getEligiblePlayers();
   let written = 0;
   let skipped = 0;
 
-  for (const player of players) {
+  async function processPlayer(player) {
     const gameId = await getNextGameForTeam(player.current_team_id);
-    if (!gameId) { skipped++; continue; } // defensive — shouldn't happen given the EXISTS filter above
+    if (!gameId) { skipped++; return; } // defensive — shouldn't happen given the EXISTS filter above
 
     const result = await computePlayerInsights(player.player_id, season);
     const blended = result ? blendScore(result.insights) : null;
-    if (!blended) { skipped++; continue; }
+    if (!blended) { skipped++; return; }
 
     await query(
       `INSERT INTO matchup_scores (player_id, game_id, season, score, categories_used, breakdown, computed_at)
@@ -145,6 +157,19 @@ async function computeAndStoreMatchupScores(season) {
       [player.player_id, gameId, season, blended.score, blended.categoriesUsed, JSON.stringify(blended.breakdown)]
     );
     written++;
+  }
+
+  // Progress logging so a long run is visibly making progress rather than
+  // looking hung — this is exactly the ambiguity that made a dropped
+  // connection hard to tell apart from "still working" before this file
+  // had bounded concurrency at all.
+  for (let i = 0; i < players.length; i += CONCURRENCY) {
+    const batch = players.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(processPlayer));
+    const done = Math.min(i + CONCURRENCY, players.length);
+    if (done % (CONCURRENCY * 10) === 0 || done === players.length) {
+      console.log(`[matchup-score] progress: ${done}/${players.length} players processed`);
+    }
   }
 
   return { written, skipped, eligible: players.length };
