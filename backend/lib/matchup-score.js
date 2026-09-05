@@ -95,11 +95,22 @@ const SPECIAL_TEAMS_POSITIONS = ['K', 'P', 'LS', 'KR', 'PR'];
 // matchups" scope. computePlayerInsights() would return all-null for
 // anyone else anyway, so this is a performance filter, not a
 // correctness one.
+//
+// status = 'ACT' — NOT the lowercase 'active' schema.sql's own comment
+// describes as the intended convention. worker/ingestion-worker.js's
+// syncRoster() writes nflverse's raw roster status code verbatim
+// (`row.status || 'active'`), and nflverse's real codes are things like
+// ACT/CUT/DEV/RES/INA/RET, never the word "active" — confirmed against
+// live Railway data (`SELECT status, COUNT(*) FROM players GROUP BY
+// status`: ACT 3301, CUT 1230, DEV 1073, RES 627, ...). schema.sql's
+// comment is aspirational for a status value WE mint, not a description
+// of what the vendor sync actually stores — worth reconciling at some
+// point, but out of scope here; this file just needs to match reality.
 async function getEligiblePlayers() {
   const { rows } = await query(
     `SELECT p.player_id, p.current_team_id
      FROM players p
-     WHERE p.status = 'active'
+     WHERE p.status = 'ACT'
        AND p.current_team_id IS NOT NULL
        AND p.position != ALL($1::text[])
        AND EXISTS (
