@@ -20,6 +20,7 @@ const queryRoutes = require('./routes/query');
 const insightsRoutes = require('./routes/insights');
 const oddsRoutes = require('./routes/odds');
 const picksRoutes = require('./routes/picks');
+const matchupScoresRoutes = require('./routes/matchup-scores');
 
 const app = express();
 app.use(express.json());
@@ -74,6 +75,11 @@ app.use('/odds', oddsRoutes);
 // picks_log read view. See routes/picks.js and worker/ingestion-worker.js's
 // grade_picks job for the write path.
 app.use('/picks', picksRoutes);
+// Blended per-matchup score (Part 2 Phase 2) — cached daily snapshot, see
+// routes/matchup-scores.js, lib/matchup-score.js, and
+// scripts/compute-matchup-scores.js (its own Railway cron service) for
+// the write path.
+app.use('/matchup-scores', matchupScoresRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
