@@ -22,6 +22,7 @@ const oddsRoutes = require('./routes/odds');
 const picksRoutes = require('./routes/picks');
 const matchupScoresRoutes = require('./routes/matchup-scores');
 const rankingsRoutes = require('./routes/rankings');
+const edgeRoutes = require('./routes/edge');
 
 const app = express();
 app.use(express.json());
@@ -85,6 +86,12 @@ app.use('/matchup-scores', matchupScoresRoutes);
 // top-N view over matchup_scores for one stat category, no LLM call. See
 // routes/rankings.js and lib/ranking.js.
 app.use('/rankings', rankingsRoutes);
+// Edge agent (Part 2 Phase 2, docs/part2-roadmap.md) — game-level v1:
+// compares each team's aggregate offensive-skill matchup-score lean
+// against which side game_odds' spreads/h2h actually favors. See
+// routes/edge.js and lib/edge.js for why this is scoped to game-level
+// rather than player-prop level for now.
+app.use('/edge', edgeRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
