@@ -100,8 +100,17 @@ async function compareGameEdge(gameId) {
     return { game_id: gameId, home_lean: homeLean, away_lean: awayLean, market_favorite: null, edge: null, note: 'No spreads or h2h odds synced yet for this game.' };
   }
 
+  // model_margin matters as much as the favorite direction itself — a
+  // 46.2-vs-45.0 lean and a 59.7-vs-47.8 lean both produce a "favorite,"
+  // but the first is essentially a coin flip and the second is a real
+  // gap. Exposing the raw margin (rather than collapsing straight to a
+  // boolean) is the same "don't fake a confident answer" principle
+  // insights.js and blendScore() already follow with categoriesUsed —
+  // let the reader judge how much a disagreement actually means.
   let modelFavorite = null;
+  let modelMargin = null;
   if (homeLean && awayLean) {
+    modelMargin = Math.abs(homeLean.avg_score - awayLean.avg_score);
     if (homeLean.avg_score > awayLean.avg_score) modelFavorite = 'home';
     else if (awayLean.avg_score > homeLean.avg_score) modelFavorite = 'away';
   } else if (homeLean) {
@@ -117,6 +126,7 @@ async function compareGameEdge(gameId) {
     home_lean: homeLean,
     away_lean: awayLean,
     model_favorite: modelFavorite,
+    model_margin: modelMargin,
     market_favorite: market.favorite,
     market_margin: market.margin,
     market_source: market.source,
@@ -125,7 +135,7 @@ async function compareGameEdge(gameId) {
       ? "Not enough signal on one side, or the market is a pick-'em, to compare a direction."
       : agrees
         ? `Model's offensive-skill lean and the market's ${market.source} favorite agree (${market.favorite}).`
-        : `Model's offensive-skill lean favors ${modelFavorite}, but the market's ${market.source} favors ${market.favorite} — worth a closer look.`,
+        : `Model's offensive-skill lean favors ${modelFavorite} (by ${modelMargin === null ? 'n/a' : modelMargin.toFixed(1)}), but the market's ${market.source} favors ${market.favorite} — worth a closer look, more so if that margin is wide than if it's thin.`,
   };
 }
 
