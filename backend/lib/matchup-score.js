@@ -152,6 +152,7 @@ async function computeAndStoreMatchupScores(season) {
       `INSERT INTO matchup_scores (player_id, game_id, season, score, categories_used, breakdown, computed_at)
        VALUES ($1, $2, $3, $4, $5, $6, now())
        ON CONFLICT (player_id, game_id) DO UPDATE SET
+         season = EXCLUDED.season,
          score = EXCLUDED.score, categories_used = EXCLUDED.categories_used,
          breakdown = EXCLUDED.breakdown, computed_at = now()`,
       [player.player_id, gameId, season, blended.score, blended.categoriesUsed, JSON.stringify(blended.breakdown)]
