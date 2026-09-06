@@ -21,6 +21,7 @@ const insightsRoutes = require('./routes/insights');
 const oddsRoutes = require('./routes/odds');
 const picksRoutes = require('./routes/picks');
 const matchupScoresRoutes = require('./routes/matchup-scores');
+const rankingsRoutes = require('./routes/rankings');
 
 const app = express();
 app.use(express.json());
@@ -80,6 +81,10 @@ app.use('/picks', picksRoutes);
 // scripts/compute-matchup-scores.js (its own Railway cron service) for
 // the write path.
 app.use('/matchup-scores', matchupScoresRoutes);
+// Ranking agent (Part 2 Phase 2, docs/part2-roadmap.md) — deterministic
+// top-N view over matchup_scores for one stat category, no LLM call. See
+// routes/rankings.js and lib/ranking.js.
+app.use('/rankings', rankingsRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
