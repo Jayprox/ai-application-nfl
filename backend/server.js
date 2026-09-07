@@ -23,6 +23,7 @@ const picksRoutes = require('./routes/picks');
 const matchupScoresRoutes = require('./routes/matchup-scores');
 const rankingsRoutes = require('./routes/rankings');
 const edgeRoutes = require('./routes/edge');
+const portfolioRoutes = require('./routes/portfolio');
 
 const app = express();
 app.use(express.json());
@@ -92,6 +93,13 @@ app.use('/rankings', rankingsRoutes);
 // routes/edge.js and lib/edge.js for why this is scoped to game-level
 // rather than player-prop level for now.
 app.use('/edge', edgeRoutes);
+// Portfolio agent (Part 2 Phase 2, docs/part2-roadmap.md) — "given a goal
+// and a unit size, builds a slate from the strongest edges with
+// reasoning." Draws on /edge's disagreements, flat-sizes each pick, and
+// logs game_line picks_log rows (006_picks_log_game_lines.sql) so the
+// same grade_picks job (worker/ingestion-worker.js) tracks its hit rate.
+// See routes/portfolio.js and lib/portfolio.js.
+app.use('/portfolio', portfolioRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw

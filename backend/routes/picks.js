@@ -2,12 +2,15 @@
  * Chalk That NFL — picks route
  * =========================================================================
  * Read-only view onto picks_log (Part 2 Phase 2's calibration/tracking
- * layer — db/migrations/004_picks_log.sql, worker/ingestion-worker.js's
- * grade_picks job). No agent writes picks yet — scripts/seed-test-picks.js
- * is the only writer for now (see that file's header). This route exists
- * so the hit rate grade_picks computes is actually visible to a client,
- * not just Railway logs, and so a future agent/UI can list what's been
- * picked and how it graded without a direct DB connection.
+ * layer — db/migrations/004_picks_log.sql, extended by 006_picks_log_
+ * game_lines.sql for game-level picks; worker/ingestion-worker.js's
+ * grade_picks job grades both shapes). scripts/seed-test-picks.js is the
+ * player_stat-shape writer; the portfolio agent (lib/portfolio.js,
+ * POST /portfolio/slate) is the first real agent writer, logging
+ * game_line picks. This route exists so the hit rate grade_picks
+ * computes is actually visible to a client, not just Railway logs, and
+ * so a future agent/UI can list what's been picked and how it graded
+ * without a direct DB connection.
  *
  * GET /picks              — list picks, most recent first.
  *                            ?agent_name=, ?status=, ?game_id=, ?player_id=
@@ -101,11 +104,14 @@ router.get('/', async (req, res) => {
 
   try {
     const { rows } = await query(
-      `SELECT pl.pick_id, pl.agent_name, pl.game_id, pl.player_id, p.full_name AS player_name,
-              pl.stat_category, pl.predicted_direction, pl.predicted_line, pl.confidence, pl.reasoning,
+      `SELECT pl.pick_id, pl.agent_name, pl.pick_type, pl.game_id, pl.player_id, p.full_name AS player_name,
+              pl.stat_category, pl.predicted_direction, pl.predicted_line,
+              pl.market, pl.predicted_team_id, t.abbreviation AS predicted_team_abbr, pl.units,
+              pl.confidence, pl.reasoning,
               pl.status, pl.actual_value, pl.graded_at, pl.created_at
        FROM picks_log pl
        LEFT JOIN players p ON p.player_id = pl.player_id
+       LEFT JOIN teams t ON t.team_id = pl.predicted_team_id
        ${whereClause}
        ORDER BY pl.created_at DESC
        LIMIT ${MAX_RESULTS}`,

@@ -27,6 +27,15 @@
  * probability, no confidence score, no combined total-points read —
  * those would require calibrating matchup_scores against real point
  * differentials, which hasn't been done and isn't attempted here.
+ *
+ * home_team_id/away_team_id ride along on every compareGameEdge() return
+ * (added for the portfolio agent, backend/lib/portfolio.js) so a caller
+ * can resolve model_favorite ('home'/'away') to an actual team_id for
+ * picks_log's predicted_team_id column without a second games query.
+ * latestOdds() is exported for the same reason — compareGameEdge only
+ * returns market_margin's magnitude (e.g. "3.5"), not the signed line
+ * itself (e.g. "home -3.5"); the portfolio agent re-fetches the same row
+ * to put the actual line in a pick's reasoning text.
  * =========================================================================
  */
 
@@ -92,12 +101,30 @@ async function compareGameEdge(gameId) {
   ]);
 
   if (!homeLean && !awayLean) {
-    return { game_id: gameId, home_lean: null, away_lean: null, market_favorite: null, edge: null, note: 'No matchup scores computed yet for either team in this game.' };
+    return {
+      game_id: gameId,
+      home_team_id: game.home_team_id,
+      away_team_id: game.away_team_id,
+      home_lean: null,
+      away_lean: null,
+      market_favorite: null,
+      edge: null,
+      note: 'No matchup scores computed yet for either team in this game.',
+    };
   }
 
   const market = marketFavorite(spreadsRow, h2hRow);
   if (!market) {
-    return { game_id: gameId, home_lean: homeLean, away_lean: awayLean, market_favorite: null, edge: null, note: 'No spreads or h2h odds synced yet for this game.' };
+    return {
+      game_id: gameId,
+      home_team_id: game.home_team_id,
+      away_team_id: game.away_team_id,
+      home_lean: homeLean,
+      away_lean: awayLean,
+      market_favorite: null,
+      edge: null,
+      note: 'No spreads or h2h odds synced yet for this game.',
+    };
   }
 
   // model_margin matters as much as the favorite direction itself — a
@@ -123,6 +150,8 @@ async function compareGameEdge(gameId) {
 
   return {
     game_id: gameId,
+    home_team_id: game.home_team_id,
+    away_team_id: game.away_team_id,
     home_lean: homeLean,
     away_lean: awayLean,
     model_favorite: modelFavorite,
@@ -152,4 +181,4 @@ async function listEdges({ season, week, onlyDisagreements }) {
   return onlyDisagreements ? results.filter((r) => r.edge === true) : results;
 }
 
-module.exports = { compareGameEdge, listEdges, OFFENSE_SKILL_POSITIONS };
+module.exports = { compareGameEdge, listEdges, latestOdds, OFFENSE_SKILL_POSITIONS };

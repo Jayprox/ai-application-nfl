@@ -38,11 +38,13 @@
  *     what's confirmed vs. still-open.
  *   - grade_picks is REAL (Part 2 Phase 2's calibration/tracking layer —
  *     see docs/part2-roadmap.md "3 paths" discussion). Grades picks_log
- *     rows (db/migrations/004_picks_log.sql) against final games once an
- *     hour and logs the all-time hit rate. No agent writes to picks_log
- *     yet — scripts/seed-test-picks.js is the only writer for now, used
- *     to validate this job against real 2021-2025 historical games
- *     before any agent depends on it.
+ *     rows (db/migrations/004_picks_log.sql, extended by 006_picks_log_
+ *     game_lines.sql for game-level picks) against final games once an
+ *     hour and logs the all-time hit rate. The portfolio agent (backend/
+ *     lib/portfolio.js) is the first real agent writer, logging
+ *     game_line picks; scripts/seed-test-picks.js remains the
+ *     player_stat-shape writer used to validate the original path
+ *     against real 2021-2025 historical games.
  *
  * This file is intentionally self-contained (its own worker/package.json,
  * its own copy of the small fetch/normalize helpers scripts/
@@ -1317,12 +1319,19 @@ async function syncOdds() {
 // ---------------------------------------------------------------------
 // grade_picks — calibration/tracking layer (Part 2 Phase 2, "3 paths"
 // discussion — see docs/part2-roadmap.md). Grades any picks_log row
-// whose linked game has gone final: looks up the actual stat value,
-// compares it to the pick's line/direction, and writes back status +
-// actual_value. Doesn't care who or what inserted the pick (a future
-// agent, or scripts/seed-test-picks.js for now) — this is purely "given
-// a claim and a fact, was the claim right." No external vendor call, so
-// unlike every other job here it only ever touches our own tables.
+// whose linked game has gone final: looks up the actual stat value (or,
+// for a game_line pick, the game's own final score), compares it to the
+// pick's line/direction/side, and writes back status + actual_value.
+// Doesn't care who or what inserted the pick (a future agent, or
+// scripts/seed-test-picks.js for now) — this is purely "given a claim
+// and a fact, was the claim right." No external vendor call, so unlike
+// every other job here it only ever touches our own tables.
+//
+// 006_picks_log_game_lines.sql added pick_type ('player_stat' |
+// 'game_line') — the two shapes are graded via separate branches below,
+// see GAME_LINE_WINNER_MARKETS just above the game_line branch for why
+// h2h and spreads are graded identically (straight-up winner, not
+// against-the-spread).
 // ---------------------------------------------------------------------
 
 // stat_category -> which *_game_stats table/column(s) hold the actual
@@ -1342,9 +1351,21 @@ const STAT_CATEGORY_MAP = {
   tackles: { table: 'player_defense_game_stats', expr: '(COALESCE(tackles_solo, 0) + COALESCE(tackles_assist, 0))' },
 };
 
+// h2h and spreads game_line picks are graded identically: did
+// predicted_team_id actually win the game. Neither market shape stores a
+// point line at pick time (see 006_picks_log_game_lines.sql's design
+// notes) — the edge agent's lean (backend/lib/edge.js) is a direction,
+// not a point-margin prediction, so there's no honest number to grade a
+// spread pick "against the spread" with. totals is handled separately
+// below since it's an over/under-a-number shape, same as a player_stat
+// pick, just against the game's combined score instead of a stat line.
+const GAME_LINE_WINNER_MARKETS = ['h2h', 'spreads'];
+
 async function gradePendingPicks() {
   const { rows: pending } = await pool.query(
-    `SELECT pl.pick_id, pl.game_id, pl.player_id, pl.stat_category, pl.predicted_direction, pl.predicted_line
+    `SELECT pl.pick_id, pl.pick_type, pl.game_id, pl.player_id, pl.stat_category,
+            pl.predicted_direction, pl.predicted_line, pl.market, pl.predicted_team_id,
+            g.home_team_id, g.away_team_id, g.home_score, g.away_score
      FROM picks_log pl
      JOIN games g ON g.game_id = pl.game_id
      WHERE pl.status = 'pending' AND g.status = 'final'`
@@ -1359,38 +1380,71 @@ async function gradePendingPicks() {
   const tallies = { correct: 0, incorrect: 0, push: 0, void: 0 };
 
   for (const pick of pending) {
-    const statConfig = STAT_CATEGORY_MAP[pick.stat_category];
-    if (!statConfig) {
-      // Left 'pending' on purpose, not voided — an unrecognized category
-      // means STAT_CATEGORY_MAP is missing an entry (a bug on our side),
-      // not that the pick is ungradeable. Fix the map and the next run
-      // picks it back up.
-      console.warn(`[job:grade_picks] pick ${pick.pick_id}: unrecognized stat_category "${pick.stat_category}" — skipping (see STAT_CATEGORY_MAP)`);
-      continue;
-    }
-
-    const { rows } = await pool.query(
-      `SELECT ${statConfig.expr} AS actual_value FROM ${statConfig.table} WHERE game_id = $1 AND player_id = $2`,
-      [pick.game_id, pick.player_id]
-    );
-
     let status;
     let actualValue = null;
-    if (!rows.length || rows[0].actual_value === null) {
-      // Game is final but this player has no stat row for it (or an
-      // unexpectedly null column on a single-stat category) — inactive,
-      // DNP, or a vendor gap. Can't be graded correct/incorrect, and
-      // shouldn't sit 'pending' forever waiting for a stat that will
-      // never arrive.
-      status = 'void';
-    } else {
-      actualValue = Number(rows[0].actual_value);
-      if (actualValue === Number(pick.predicted_line)) {
-        status = 'push';
-      } else if (pick.predicted_direction === 'over') {
-        status = actualValue > pick.predicted_line ? 'correct' : 'incorrect';
+
+    if (pick.pick_type === 'game_line') {
+      if (pick.home_score === null || pick.away_score === null) {
+        // Marked 'final' but the score hasn't landed yet — a sync-order
+        // gap (schedule sync flipped status before a score sync ran),
+        // not a permanently ungradeable pick. Voided for the same "don't
+        // sit pending forever" reason as the player-stat path below, but
+        // worth its own warning since it points at a different job.
+        console.warn(`[job:grade_picks] pick ${pick.pick_id}: game ${pick.game_id} is final but has no score yet — voiding`);
+        status = 'void';
+      } else if (GAME_LINE_WINNER_MARKETS.includes(pick.market)) {
+        actualValue = pick.home_score - pick.away_score; // home-perspective margin, kept for context/debugging only
+        if (pick.home_score === pick.away_score) {
+          status = 'push'; // an NFL tie — rare, but not a loss
+        } else {
+          const winningTeamId = pick.home_score > pick.away_score ? pick.home_team_id : pick.away_team_id;
+          status = pick.predicted_team_id === winningTeamId ? 'correct' : 'incorrect';
+        }
+      } else if (pick.market === 'totals') {
+        actualValue = pick.home_score + pick.away_score;
+        if (actualValue === Number(pick.predicted_line)) {
+          status = 'push';
+        } else if (pick.predicted_direction === 'over') {
+          status = actualValue > pick.predicted_line ? 'correct' : 'incorrect';
+        } else {
+          status = actualValue < pick.predicted_line ? 'correct' : 'incorrect';
+        }
       } else {
-        status = actualValue < pick.predicted_line ? 'correct' : 'incorrect';
+        console.warn(`[job:grade_picks] pick ${pick.pick_id}: unrecognized game_line market "${pick.market}" — skipping`);
+        continue;
+      }
+    } else {
+      const statConfig = STAT_CATEGORY_MAP[pick.stat_category];
+      if (!statConfig) {
+        // Left 'pending' on purpose, not voided — an unrecognized category
+        // means STAT_CATEGORY_MAP is missing an entry (a bug on our side),
+        // not that the pick is ungradeable. Fix the map and the next run
+        // picks it back up.
+        console.warn(`[job:grade_picks] pick ${pick.pick_id}: unrecognized stat_category "${pick.stat_category}" — skipping (see STAT_CATEGORY_MAP)`);
+        continue;
+      }
+
+      const { rows } = await pool.query(
+        `SELECT ${statConfig.expr} AS actual_value FROM ${statConfig.table} WHERE game_id = $1 AND player_id = $2`,
+        [pick.game_id, pick.player_id]
+      );
+
+      if (!rows.length || rows[0].actual_value === null) {
+        // Game is final but this player has no stat row for it (or an
+        // unexpectedly null column on a single-stat category) — inactive,
+        // DNP, or a vendor gap. Can't be graded correct/incorrect, and
+        // shouldn't sit 'pending' forever waiting for a stat that will
+        // never arrive.
+        status = 'void';
+      } else {
+        actualValue = Number(rows[0].actual_value);
+        if (actualValue === Number(pick.predicted_line)) {
+          status = 'push';
+        } else if (pick.predicted_direction === 'over') {
+          status = actualValue > pick.predicted_line ? 'correct' : 'incorrect';
+        } else {
+          status = actualValue < pick.predicted_line ? 'correct' : 'incorrect';
+        }
       }
     }
 
