@@ -28,13 +28,14 @@
  *     Railway). See docs/part2-roadmap.md's vendor decision.
  *   - sync_injury_reports and sync_live_stats are now REAL too
  *     (Highlightly — highlightly.net via RapidAPI, the live-stats vendor
- *     decision, see docs/part2-roadmap.md). NOT YET DRY-RUN TESTED —
- *     HIGHLIGHTLY_API_KEY was only just provisioned. Written against
- *     Highlightly's documented request/response shape, which is a
- *     paraphrase of their docs page rather than a captured real response —
- *     see the job bodies' own comment for exactly what's confirmed vs.
- *     best-effort-guessed (particularly sync_live_stats's stat-name
- *     mapping), and what the first real dry run needs to check.
+ *     decision, see docs/part2-roadmap.md). DRY-RUN TESTED against real
+ *     injuries and a real completed game's box score — STAT_FIELD_MAP and
+ *     the team-abbreviation alias were rewritten from that real response
+ *     after the original docs-paraphrase guesses turned out almost
+ *     entirely wrong. sync_live_stats itself still needs to be watched
+ *     during an actual live game (Sept 9+) to confirm the corrected map
+ *     holds up in-game — see the job bodies' own comment for exactly
+ *     what's confirmed vs. still-open.
  *   - grade_picks is REAL (Part 2 Phase 2's calibration/tracking layer —
  *     see docs/part2-roadmap.md "3 paths" discussion). Grades picks_log
  *     rows (db/migrations/004_picks_log.sql) against final games once an
@@ -447,12 +448,19 @@ async function upsertStBatch(batch) {
      ON CONFLICT (game_id, player_id) DO UPDATE SET
        fg_attempts = EXCLUDED.fg_attempts, fg_made = EXCLUDED.fg_made, longest_fg = EXCLUDED.longest_fg,
        xp_attempts = EXCLUDED.xp_attempts, xp_made = EXCLUDED.xp_made,
+       punts = EXCLUDED.punts, punt_yards = EXCLUDED.punt_yards, punt_avg = EXCLUDED.punt_avg,
        kick_return_yards = EXCLUDED.kick_return_yards, punt_return_yards = EXCLUDED.punt_return_yards,
        return_tds = EXCLUDED.return_tds`,
     batch.flatMap(({ row, playerId, teamId }) => [
       row.game_id, playerId, teamId,
       n(row.fg_att), n(row.fg_made), n(row.fg_long), n(row.pat_att), n(row.pat_made),
-      null, null, null, // punts/punt_yards/punt_avg — see scripts/backfill-historical.js header, not in this source
+      // punts/punt_yards/punt_avg: NULL for the nflverse historical path
+      // (genuinely not in that source — see scripts/backfill-historical.js
+      // header), but Highlightly's real Punting group DOES provide these
+      // (confirmed: 'total punts', 'total punting yards', 'average gross
+      // punting yards' — see STAT_FIELD_MAP above), so sync_live_stats now
+      // wires real values through here.
+      n(row.punts), n(row.punt_yards), n(row.punt_avg),
       n(row.kickoff_return_yards), n(row.punt_return_yards), n(row.special_teams_tds),
     ])
   );
@@ -615,28 +623,35 @@ async function syncForecastWeather() {
 // (highlightly.net via RapidAPI, host nfl-ncaa-highlights-api). Part 2
 // Phase 1's live-stats vendor decision — see docs/part2-roadmap.md.
 //
-// NOT yet dry-run tested against a live key — HIGHLIGHTLY_API_KEY was
-// only just provisioned. Written against Highlightly's documented
-// request/response shape (highlightly.net/nfl-api/documentation/), which
-// is itself a paraphrase of their docs page rather than a captured real
-// response, so treat field names below as a best guess pending the first
-// real dry run, not a confirmed contract — same "run it for real before
-// trusting it" step every other vendor job here needed. Specifically:
-//   - /matches and /matches/{id} (injuries) — the shape (team block ->
-//     data[] -> {status, player:{name,jersey,position}}) is reasonably
-//     confirmed from the docs' own example payload. NOT confirmed:
-//     whether Highlightly's status strings line up with this app's
-//     injury_report_status_enum, or whether there's a practice-status /
-//     injury-description field at all — INJURY_STATUS_MAP only handles
-//     the values the docs showed, and unrecognized ones are logged
-//     (once) and left NULL rather than guessed.
-//   - /box-score/{matchId} — only ONE example stat ({group:"Passing",
-//     name:"Total Successful Passes"}) was confirmed from the docs;
-//     the rest of STAT_FIELD_MAP is an educated guess at Highlightly's
-//     naming convention. syncLiveStats logs any (group, name) pair it
-//     doesn't recognize (once per pair) so the first live dry run,
-//     during an actual game window, surfaces the real vocabulary to
-//     correct this against.
+// DRY-RUN TESTED against a real key for injuries + a real completed game's
+// box score (matchId 262393, WAS@NYG 2025-09-07) — that real response is
+// what STAT_FIELD_MAP and INJURY_STATUS_MAP below are now built from,
+// replacing the earlier docs-paraphrase guesswork. What's still open:
+//   - /matches and /matches/{id} (injuries) — shape (team block ->
+//     data[] -> {status, player:{name,jersey,position}}) is confirmed
+//     from a real response. Still NOT confirmed: whether every one of
+//     Highlightly's status strings lines up with this app's
+//     injury_report_status_enum (only the values seen so far — "Out",
+//     "Questionable" — are in INJURY_STATUS_MAP; others are logged once
+//     and left NULL rather than guessed). Also confirmed as a real,
+//     permanent vendor limitation rather than a bug: their injuries
+//     payload never includes an injury type/description field (only
+//     name/jersey/position/status) — primaryInjury will always resolve
+//     to NULL until/unless that changes on their end.
+//   - /box-score/{matchId} — STAT_FIELD_MAP below is now built entirely
+//     from a real captured response covering Passing, Rushing,
+//     Receiving, Defense, General (fumbles), Kicking, and Punting. One
+//     real, confirmed vendor gap: Highlightly's Defense group (at least
+//     at this account's tier) has no interceptions / forced-fumbles /
+//     fumble-recoveries / QB-hits fields at all — see that section's own
+//     comment. syncLiveStats still logs any (group, name) pair it
+//     doesn't recognize (once per pair), which is how this map was
+//     corrected once already and how any further gaps (e.g. a stat type
+//     not present in the one game captured so far) will surface.
+//   - Team abbreviation: Highlightly's own abbreviations don't always
+//     match this app's `teams` table — confirmed for Washington
+//     (WAS here vs WSH there) via a direct A/B test — see
+//     HIGHLIGHTLY_ABBR_ALIASES below.
 //   - Player identity: injuries only give a name (no stable per-vendor
 //     player id), so those match by name+team against `players` with NO
 //     crosswalk and are SKIPPED (not inserted) on a 0 or >1 candidate
@@ -677,6 +692,24 @@ async function loadTeamNameMap() {
   return { idByName, abbrByTeamId };
 }
 
+// Highlightly uses a different abbreviation than our own `teams` table for
+// at least one team — CONFIRMED via a real A/B test against a completed
+// game (matchId 262393, WAS@NYG 2025-09-07): querying /matches with our
+// schema's "WAS" returned zero results, while "WSH" correctly found it
+// (homeTeam.abbreviation in their response is literally "WSH"). Applied
+// both when querying Highlightly's /matches filter (which needs their
+// spelling) and when matching their injuries response's team blocks back
+// to our team_id (which also comes back in their spelling) — see
+// findHighlightlyMatch() and syncInjuryReports() below. Only Washington
+// was directly confirmed mismatched; every other abbreviation seen in the
+// real dumps so far (NYG, and the rest of the 2025-09-07 slate) matched
+// ours exactly, but this is the place to add more if a future dry run
+// turns one up.
+const HIGHLIGHTLY_ABBR_ALIASES = { WAS: 'WSH' };
+function toHighlightlyAbbr(abbr) {
+  return HIGHLIGHTLY_ABBR_ALIASES[abbr] || abbr;
+}
+
 // Resolves one of our `games` rows to Highlightly's numeric match id, by
 // date + team abbreviation (their documented /matches filters). Tries the
 // game's UTC date first, then ±1 day — same tolerance idea as
@@ -693,6 +726,8 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache) {
     cache.set(game.game_id, null);
     return null;
   }
+  const hlHomeAbbr = toHighlightlyAbbr(homeAbbr);
+  const hlAwayAbbr = toHighlightlyAbbr(awayAbbr);
 
   const kickoff = new Date(game.game_datetime);
   const dateCandidates = [0, -1, 1].map((offset) => {
@@ -705,7 +740,7 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache) {
     let payload;
     try {
       payload = await fetchHighlightly('/matches', {
-        date, league: 'NFL', homeTeamAbbreviation: homeAbbr, awayTeamAbbreviation: awayAbbr, limit: 5,
+        date, league: 'NFL', homeTeamAbbreviation: hlHomeAbbr, awayTeamAbbreviation: hlAwayAbbr, limit: 5,
       });
     } catch (err) {
       console.warn(`[highlightly] /matches lookup failed for ${awayAbbr}@${homeAbbr} on ${date} (${err.message})`);
@@ -804,8 +839,8 @@ async function syncInjuryReports() {
     for (const teamBlock of detail.injuries || []) {
       const blockAbbr = teamBlock.team?.abbreviation;
       const teamId =
-        blockAbbr === abbrByTeamId[game.home_team_id] ? game.home_team_id :
-        blockAbbr === abbrByTeamId[game.away_team_id] ? game.away_team_id :
+        blockAbbr === toHighlightlyAbbr(abbrByTeamId[game.home_team_id]) ? game.home_team_id :
+        blockAbbr === toHighlightlyAbbr(abbrByTeamId[game.away_team_id]) ? game.away_team_id :
         null;
       if (!teamId) {
         console.warn(`[job:sync_injury_reports] injury block team "${blockAbbr}" didn't match either side of game ${game.game_id}`);
@@ -850,43 +885,100 @@ async function syncInjuryReports() {
 }
 
 // Box-score stat (group, name) -> our upsertOffense/Defense/StBatch column
-// name + bucket. Keys are lowercased "group|name". See file header — only
-// the 'passing|total successful passes' entry is confirmed; the rest are
-// a best-effort guess pending a real dry run.
+// name + bucket. Keys are lowercased "group|name". REWRITTEN against a
+// real captured box score (matchId 262393, WAS@NYG 2025-09-07 — a QB, two
+// RBs, several WR/TEs, a full defense including sack/TFL/INT-adjacent
+// plays, a kicker, and a punter/returner all appear in that one real
+// response) — every key below is confirmed against that response unless
+// its own comment says otherwise. The old guessed vocabulary (short
+// phrasings like "passing yards", a "special teams" group that doesn't
+// exist) never matched anything real; see the group-by-group notes below
+// for what changed and why.
 const STAT_FIELD_MAP = {
+  // --- Passing --- all confirmed.
   'passing|total successful passes': { bucket: 'offense', col: 'completions' },
-  'passing|pass attempts': { bucket: 'offense', col: 'attempts' },
-  'passing|passing attempts': { bucket: 'offense', col: 'attempts' },
-  'passing|passing yards': { bucket: 'offense', col: 'passing_yards' },
-  'passing|passing touchdowns': { bucket: 'offense', col: 'passing_tds' },
-  'passing|interceptions thrown': { bucket: 'offense', col: 'passing_interceptions' },
-  'passing|sacks taken': { bucket: 'offense', col: 'sacks_suffered' },
-  'rushing|rushing attempts': { bucket: 'offense', col: 'carries' },
-  'rushing|carries': { bucket: 'offense', col: 'carries' },
-  'rushing|rushing yards': { bucket: 'offense', col: 'rushing_yards' },
-  'rushing|rushing touchdowns': { bucket: 'offense', col: 'rushing_tds' },
-  'rushing|fumbles lost': { bucket: 'offense', col: 'fumbles_lost_total' },
-  'receiving|targets': { bucket: 'offense', col: 'targets' },
-  'receiving|receptions': { bucket: 'offense', col: 'receptions' },
-  'receiving|receiving yards': { bucket: 'offense', col: 'receiving_yards' },
-  'receiving|receiving touchdowns': { bucket: 'offense', col: 'receiving_tds' },
-  'defense|solo tackles': { bucket: 'defense', col: 'def_tackles_solo' },
-  'defense|assisted tackles': { bucket: 'defense', col: 'def_tackles_with_assist' },
-  'defense|sacks': { bucket: 'defense', col: 'def_sacks' },
-  'defense|tackles for loss': { bucket: 'defense', col: 'def_tackles_for_loss' },
-  'defense|qb hits': { bucket: 'defense', col: 'def_qb_hits' },
-  'defense|interceptions': { bucket: 'defense', col: 'def_interceptions' },
-  'defense|passes defended': { bucket: 'defense', col: 'def_pass_defended' },
-  'defense|forced fumbles': { bucket: 'defense', col: 'def_fumbles_forced' },
-  'defense|fumble recoveries': { bucket: 'defense', col: 'def_fumbles' },
-  'defense|defensive touchdowns': { bucket: 'defense', col: 'def_tds' },
-  'special teams|field goals attempted': { bucket: 'special_teams', col: 'fg_att' },
-  'special teams|field goals made': { bucket: 'special_teams', col: 'fg_made' },
-  'special teams|extra points attempted': { bucket: 'special_teams', col: 'pat_att' },
-  'special teams|extra points made': { bucket: 'special_teams', col: 'pat_made' },
-  'special teams|kickoff return yards': { bucket: 'special_teams', col: 'kickoff_return_yards' },
-  'special teams|punt return yards': { bucket: 'special_teams', col: 'punt_return_yards' },
-  'special teams|special teams touchdowns': { bucket: 'special_teams', col: 'special_teams_tds' },
+  'passing|total passes': { bucket: 'offense', col: 'attempts' },
+  'passing|total passing yards': { bucket: 'offense', col: 'passing_yards' },
+  'passing|total passing touchdowns': { bucket: 'offense', col: 'passing_tds' },
+  'passing|total passing interceptions': { bucket: 'offense', col: 'passing_interceptions' },
+  'passing|total sacks': { bucket: 'offense', col: 'sacks_suffered' },
+
+  // --- Rushing --- all confirmed. Fumbles are NOT tracked here — the one
+  // real fumble in the captured sample (Russell Wilson's) was logged
+  // under General, not Rushing — see that section below.
+  'rushing|total rushing attempts': { bucket: 'offense', col: 'carries' },
+  'rushing|total rushing yards': { bucket: 'offense', col: 'rushing_yards' },
+  'rushing|total rushing touchdowns': { bucket: 'offense', col: 'rushing_tds' },
+
+  // --- Receiving --- all confirmed.
+  'receiving|total receiving targets': { bucket: 'offense', col: 'targets' },
+  'receiving|total receptions': { bucket: 'offense', col: 'receptions' },
+  'receiving|total receiving yards': { bucket: 'offense', col: 'receiving_yards' },
+  'receiving|total receiving touchdowns': { bucket: 'offense', col: 'receiving_tds' },
+
+  // --- Defense --- all confirmed, but there's a real vendor gap: on this
+  // key/tier, Highlightly's Defense group has NO interceptions,
+  // forced-fumbles, fumble-recoveries, or QB-hits fields at all — only
+  // the 6 keys below exist. Confirmed directly: Quan Martin's real
+  // Sept-7 box score line has zero stat fields for his real,
+  // play-by-play-confirmed interception that game. def_interceptions /
+  // def_qb_hits / def_fumbles_forced / def_fumbles (defensive fumble
+  // recoveries) are therefore deliberately left unmapped rather than
+  // guessed — there's no vendor field to point them at right now.
+  // 'total defensive tackles' is the COMBINED (solo+assist) number —
+  // there's no separate "assisted tackles" field at all, so
+  // tackles_assist is derived (total - solo) in syncLiveStats below
+  // rather than mapped 1:1; the '_def_tackles_total' col name here is a
+  // temp carrier for that derivation, stripped before the DB write.
+  'defense|total defensive tackles': { bucket: 'defense', col: '_def_tackles_total' },
+  'defense|total defensive solo tackles': { bucket: 'defense', col: 'def_tackles_solo' },
+  'defense|total defensive sacks': { bucket: 'defense', col: 'def_sacks' },
+  'defense|total defensive tackles for loss': { bucket: 'defense', col: 'def_tackles_for_loss' },
+  'defense|total defended passes': { bucket: 'defense', col: 'def_pass_defended' },
+  'defense|total defensive touchdowns': { bucket: 'defense', col: 'def_tds' },
+
+  // --- General --- confirmed (Russell Wilson's real fumble/recovery
+  // line). Neither field maps directly to the `fumbles` DB column, which
+  // this app's own established convention (fumbles_lost_total — see
+  // scripts/backfill-historical.js and upsertOffenseBatch below) uses to
+  // mean fumbles LOST, not fumbles committed. Derivation in syncLiveStats
+  // below: fumbles_lost = total_fumbles - recovered_fumbles, assuming
+  // "recovered" means recovered by the fumbling player's own team — that
+  // assumption isn't confirmed by any vendor doc, it's a best-effort
+  // inference. (On the one real sample seen, it produces 1 - 1 = 0 lost
+  // for Wilson, which does line up with that same box score's own
+  // team-level "Fumbles Lost: 0" stat for the Giants — encouraging, but a
+  // sample of one.)
+  'general|total fumbles': { bucket: 'offense', col: '_total_fumbles' },
+  'general|total recovered fumbles': { bucket: 'offense', col: '_recovered_fumbles' },
+
+  // --- Kicking --- all confirmed (real kicker lines for Matt Gay and
+  // Graham Gano, plus kickoff-return lines on skill players). The real
+  // group name is "Kicking" — not the old guessed "special teams", which
+  // is why none of this ever matched before, and it's also where kickoff
+  // returns live (not a separate returns group). Kickoff-return
+  // touchdowns get combined with punt-return touchdowns (Punting group,
+  // below) into the single `return_tds` column this schema has — see the
+  // derivation in syncLiveStats below.
+  'kicking|successful field goals kicks': { bucket: 'special_teams', col: 'fg_made' },
+  'kicking|attempted field goal kicks': { bucket: 'special_teams', col: 'fg_att' },
+  'kicking|long field goals kicks made': { bucket: 'special_teams', col: 'fg_long' },
+  'kicking|total extra kicking points made': { bucket: 'special_teams', col: 'pat_made' },
+  'kicking|total extra kicking point attempts': { bucket: 'special_teams', col: 'pat_att' },
+  'kicking|total kick return yards': { bucket: 'special_teams', col: 'kickoff_return_yards' },
+  'kicking|total kick return touchdowns': { bucket: 'special_teams', col: '_kick_return_tds' },
+
+  // --- Punting --- all confirmed (real punter lines for Tress Way and
+  // Jamie Gillan, plus punt-return lines). Unlike the nflverse historical
+  // path (where punts/punt_yards/punt_avg genuinely aren't available —
+  // see scripts/backfill-historical.js's own header), Highlightly DOES
+  // carry real punt data, so it's now wired into upsertStBatch() below
+  // instead of staying hardcoded NULL.
+  'punting|total punts': { bucket: 'special_teams', col: 'punts' },
+  'punting|total punting yards': { bucket: 'special_teams', col: 'punt_yards' },
+  'punting|average gross punting yards': { bucket: 'special_teams', col: 'punt_avg' },
+  'punting|total punt return yards': { bucket: 'special_teams', col: 'punt_return_yards' },
+  'punting|total punt return touchdowns': { bucket: 'special_teams', col: '_punt_return_tds' },
 };
 const unrecognizedStatKeys = new Set();
 
@@ -1019,6 +1111,34 @@ async function syncLiveStats() {
         }
         processed++;
       }
+    }
+  }
+
+  // Derive fields that don't have a direct 1:1 Highlightly field — see
+  // STAT_FIELD_MAP's Defense/General/Kicking/Punting comments above for
+  // why each of these can't just be mapped straight through.
+  for (const { row } of Object.values(defenseRows)) {
+    if (row._def_tackles_total != null) {
+      const total = Number(row._def_tackles_total) || 0;
+      const solo = Number(row.def_tackles_solo) || 0;
+      row.def_tackles_with_assist = Math.max(0, total - solo);
+      delete row._def_tackles_total;
+    }
+  }
+  for (const { row } of Object.values(offenseRows)) {
+    if (row._total_fumbles != null) {
+      const total = Number(row._total_fumbles) || 0;
+      const recovered = Number(row._recovered_fumbles) || 0;
+      row.fumbles_lost_total = Math.max(0, total - recovered);
+      delete row._total_fumbles;
+      delete row._recovered_fumbles;
+    }
+  }
+  for (const { row } of Object.values(stRows)) {
+    if (row._kick_return_tds != null || row._punt_return_tds != null) {
+      row.special_teams_tds = (Number(row._kick_return_tds) || 0) + (Number(row._punt_return_tds) || 0);
+      delete row._kick_return_tds;
+      delete row._punt_return_tds;
     }
   }
 
