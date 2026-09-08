@@ -36,6 +36,15 @@
  * returns market_margin's magnitude (e.g. "3.5"), not the signed line
  * itself (e.g. "home -3.5"); the portfolio agent re-fetches the same row
  * to put the actual line in a pick's reasoning text.
+ *
+ * listEdges()'s onlyUpcoming option (also added for the portfolio agent)
+ * excludes games whose kickoff has already passed — see that function's
+ * own comment. Without it, re-running the portfolio agent partway through
+ * a week (to catch a late edge on Sunday's games, say) would also
+ * re-examine any game from earlier that week that's already final, and
+ * could log a brand-new "prediction" against an outcome that's already
+ * known — which grade_picks would then immediately grade, quietly mixing
+ * a no-lead-time pick into the same hit-rate number as real ones.
  * =========================================================================
  */
 
@@ -168,9 +177,21 @@ async function compareGameEdge(gameId) {
   };
 }
 
-async function listEdges({ season, week, onlyDisagreements }) {
+// onlyUpcoming excludes games whose kickoff has already passed. Note this
+// checks game_datetime, not games.status — sync_schedule only flips status
+// to 'final' on its once-a-day nflverse pass, so status stays 'scheduled'
+// for hours after (and during) a game that's already been played; kickoff
+// time is the only field that's actually current in real time. Off by
+// default so a general browse of a week's edges (e.g. reviewing after the
+// fact whether a disagreement called it right) still sees the whole week —
+// the portfolio agent (lib/portfolio.js) is the caller that turns this on,
+// since it's the one writing real picks and can't afford to "predict" a
+// game that's already decided.
+async function listEdges({ season, week, onlyDisagreements, onlyUpcoming }) {
   const { rows: games } = await query(
-    `SELECT game_id FROM games WHERE season = $1 AND week = $2 ORDER BY game_datetime ASC`,
+    `SELECT game_id FROM games
+     WHERE season = $1 AND week = $2 ${onlyUpcoming ? 'AND game_datetime > now()' : ''}
+     ORDER BY game_datetime ASC`,
     [season, week]
   );
   const results = [];

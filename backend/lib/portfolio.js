@@ -85,7 +85,11 @@ function describeLine(oddsRow, market, favoriteSide) {
 async function buildSlate({ season, week, maxPicks = DEFAULT_MAX_PICKS, unitSize = DEFAULT_UNITS, dryRun = false }) {
   const cappedMaxPicks = Math.min(MAX_MAX_PICKS, Math.max(1, Number(maxPicks) || DEFAULT_MAX_PICKS));
 
-  const edges = await listEdges({ season, week, onlyDisagreements: true });
+  // onlyUpcoming: true — see edge.js's listEdges() comment. Without this,
+  // a re-run partway through a week could log a pick against a game
+  // that's already final, using stale pregame odds, which grade_picks
+  // would then grade with zero real lead time.
+  const edges = await listEdges({ season, week, onlyDisagreements: true, onlyUpcoming: true });
 
   // model_margin can be null (only one side had any matchup-score signal
   // at all — see edge.js) — treat that as the weakest possible signal
