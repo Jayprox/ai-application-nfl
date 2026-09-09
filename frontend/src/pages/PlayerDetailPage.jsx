@@ -225,7 +225,11 @@ function StatGrid({ stats, columns }) {
           <div key={key} className="flex items-baseline justify-between bg-white px-4 py-3">
             <dt className="text-sm text-slate-600">{label}</dt>
             <dd className="text-sm font-semibold text-slate-900">
-              {value === null || value === undefined ? '—' : Number(value).toFixed(1)}
+              {value === null || value === undefined
+                ? '—'
+                : Number.isInteger(Number(value))
+                  ? Number(value)
+                  : Number(value).toFixed(1)}
             </dd>
           </div>
         );

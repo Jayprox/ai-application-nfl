@@ -14,8 +14,19 @@
  *   splits:      optional { home_away, game_slot, weather_condition }
  *
  * Response:
- *   { data: {...averaged stats...} | [...game log rows...],
+ *   { data: {...per-game averages (season/last5) or career totals
+ *             (career)...} | [...game log rows...],
  *     meta: { sample_size, freshness: { synced_at } } }
+ *
+ * career vs season/last5: "Career" is deliberately cumulative totals
+ * (SUM), not another per-game average, even though it shares a query
+ * shape with season/last5 — a user reading "Career: 77.5 yards" and a
+ * user reading "Career: 6,252 yards" come away with very different
+ * impressions of the same underlying data, and the tab is labeled
+ * "Career" (not "Career Avg", unlike "Season Avg"), so the label already
+ * promised totals. Rate-like columns that can't be honestly summed
+ * (a kicker's longest field goal, a punter's per-punt average) use a
+ * different aggregate — see CAREER_AGGREGATE_OVERRIDE below.
  *
  * Note: until the historical-data ingestion pass runs, `games` and the
  * *_game_stats tables are empty — every query here will correctly return
@@ -56,6 +67,27 @@ const TEAM_STAT_COLUMNS = [
   'points', 'total_yards', 'passing_yards', 'rushing_yards',
   'turnovers', 'penalties', 'penalty_yards', 'time_of_possession_seconds',
 ];
+
+// career scope aggregates every column with SUM by default (a real
+// cumulative total) except columns where summing across games would be
+// dishonest:
+//   - longest_fg is a per-game max, not a counting stat — career value
+//     is the max of those maxes, not their sum.
+//   - punt_avg is already a per-game rate (that game's punt_yards /
+//     that game's punts) — summing it across games produces a number
+//     with no real meaning. AVG here is a known simplification (an
+//     unweighted average of per-game averages, not punts-weighted); a
+//     fully correct career punt average would need SUM(punt_yards) /
+//     SUM(punts) computed separately, left as a future refinement since
+//     it only affects punters.
+const CAREER_AGGREGATE_OVERRIDE = {
+  longest_fg: 'MAX',
+  punt_avg: 'AVG',
+};
+
+function careerAggFn(column) {
+  return CAREER_AGGREGATE_OVERRIDE[column] || 'SUM';
+}
 
 const VALID_SCOPES = ['season', 'last5', 'career', 'game_log'];
 const VALID_GAME_SLOTS = [
@@ -200,7 +232,18 @@ async function queryPlayer({ entity_id, scope, season, splits }) {
     return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
   }
 
-  // season | career
+  if (scope === 'career') {
+    const { rows } = await query(
+      `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS ${c}`).join(', ')}
+       FROM ${table} stats
+       JOIN games g ON g.game_id = stats.game_id
+       ${whereSql}`,
+      params
+    );
+    return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
+  }
+
+  // season
   const { rows } = await query(
     `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `AVG(stats.${c})::float8 AS ${c}`).join(', ')}
      FROM ${table} stats
@@ -253,6 +296,18 @@ async function queryTeam({ entity_id, scope, season, splits }) {
     return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
   }
 
+  if (scope === 'career') {
+    const { rows } = await query(
+      `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS ${c}`).join(', ')}
+       FROM team_game_stats stats
+       JOIN games g ON g.game_id = stats.game_id
+       ${whereSql}`,
+      params
+    );
+    return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
+  }
+
+  // season
   const { rows } = await query(
     `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `AVG(stats.${c})::float8 AS ${c}`).join(', ')}
      FROM team_game_stats stats
