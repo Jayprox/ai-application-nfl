@@ -36,11 +36,21 @@
  * Dedup: re-running buildSlate for a week that's already been logged
  * (e.g. a cron re-fire, or a manual re-call before kickoff) should not
  * pile up duplicate picks on the same game under this agent while the
- * original is still pending — see alreadyLoggedGameIds().
+ * original is still pending — see alreadyLoggedGameIds(). That's the
+ * common-case fast path; 007_picks_log_pending_dedup.sql backs it with a
+ * real partial unique index (agent_name, game_id) WHERE status = 'pending'
+ * so a genuine race between two overlapping calls (not just a normal
+ * re-run) can't double-log a game either — see the INSERT below.
+ *
+ * The inserts themselves run inside one transaction (a single pool client,
+ * BEGIN...COMMIT/ROLLBACK) rather than a bare Promise.all of independent
+ * queries — a mid-batch failure now rolls back cleanly instead of leaving
+ * some picks committed while the route still returns a bare 500 with no
+ * way to tell which ones landed.
  * =========================================================================
  */
 
-const { query } = require('../db');
+const { pool, query } = require('../db');
 const { listEdges, latestOdds } = require('./edge');
 
 const AGENT_NAME = 'portfolio_agent_v1';
@@ -130,18 +140,44 @@ async function buildSlate({ season, week, maxPicks = DEFAULT_MAX_PICKS, unitSize
     });
   }
 
-  let inserted = [];
+  // One transaction for the whole batch, not a bare Promise.all of
+  // independent queries — see the file header. ON CONFLICT DO NOTHING
+  // against the partial unique index (007_picks_log_pending_dedup.sql) is
+  // the real backstop against a concurrent duplicate; alreadyLoggedGameIds()
+  // above only catches the common (non-racing) case. A conflict here means
+  // some other call logged a pending pick for this (agent, game) between
+  // that check and this INSERT — not an error, just a race lost, so it's
+  // folded into `skipped` rather than thrown.
+  const pickIds = new Array(slate.length).fill(null);
   if (!dryRun && slate.length) {
-    inserted = await Promise.all(
-      slate.map((pick) =>
-        query(
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (let i = 0; i < slate.length; i++) {
+        const pick = slate[i];
+        const { rows } = await client.query(
           `INSERT INTO picks_log (agent_name, pick_type, game_id, market, predicted_team_id, units, reasoning, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
-           RETURNING pick_id, game_id, market, predicted_team_id, units, created_at`,
+           ON CONFLICT (agent_name, game_id) WHERE status = 'pending' DO NOTHING
+           RETURNING pick_id`,
           [pick.agent_name, pick.pick_type, pick.game_id, pick.market, pick.predicted_team_id, pick.units, pick.reasoning]
-        ).then((r) => r.rows[0])
-      )
-    );
+        );
+        if (rows[0]) {
+          pickIds[i] = rows[0].pick_id;
+        } else {
+          skipped.push({
+            game_id: pick.game_id,
+            reason: 'lost a race to a concurrent pending pick for this game (caught by the DB-level dedup index, not the pre-check above)',
+          });
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   return {
@@ -150,10 +186,12 @@ async function buildSlate({ season, week, maxPicks = DEFAULT_MAX_PICKS, unitSize
     dry_run: dryRun,
     unit_size: unitSize,
     considered: edges.length,
-    picked: slate.length,
+    picked: dryRun ? slate.length : pickIds.filter((id) => id !== null).length,
     skipped,
-    slate: dryRun ? slate : slate.map((pick, i) => ({ ...pick, pick_id: inserted[i]?.pick_id ?? null })),
+    slate: dryRun
+      ? slate
+      : slate.map((pick, i) => ({ ...pick, pick_id: pickIds[i] })).filter((pick) => pick.pick_id !== null),
   };
 }
 
-module.exports = { buildSlate, AGENT_NAME };
+module.exports = { buildSlate, AGENT_NAME, MAX_MAX_PICKS };

@@ -143,19 +143,33 @@ async function compareGameEdge(gameId) {
   // boolean) is the same "don't fake a confident answer" principle
   // insights.js and blendScore() already follow with categoriesUsed —
   // let the reader judge how much a disagreement actually means.
+  //
+  // weakBasis: only one side has ANY matchup-score signal at all (the
+  // other has zero offense-skill players scored yet). That's not a real
+  // comparison — it's one team's number against nothing — so it's treated
+  // the same as "no signal on either side" below: agrees/edge both stay
+  // null rather than resolving to a confident agree/disagree. Originally
+  // this fell through to a normal comparison with model_margin left null,
+  // which meant a portfolio-agent caller filtering on onlyDisagreements
+  // (edge === true) couldn't tell a real two-sided disagreement from a
+  // one-sided guess dressed up the same way — model_margin being null was
+  // visible if you looked, but nothing stopped it being picked and staked
+  // like any other edge. Excluding it here means a weak-basis game simply
+  // never counts as a disagreement worth a pick.
   let modelFavorite = null;
   let modelMargin = null;
+  let weakBasis = false;
   if (homeLean && awayLean) {
     modelMargin = Math.abs(homeLean.avg_score - awayLean.avg_score);
     if (homeLean.avg_score > awayLean.avg_score) modelFavorite = 'home';
     else if (awayLean.avg_score > homeLean.avg_score) modelFavorite = 'away';
-  } else if (homeLean) {
-    modelFavorite = 'home'; // only one side has any signal at all — a weak basis, noted below
-  } else if (awayLean) {
-    modelFavorite = 'away';
+  } else {
+    weakBasis = true;
+    modelFavorite = homeLean ? 'home' : 'away'; // whichever side has any signal at all — kept for visibility, not for comparison
   }
 
-  const agrees = market.favorite === null || modelFavorite === null ? null : modelFavorite === market.favorite;
+  const agrees =
+    weakBasis || market.favorite === null || modelFavorite === null ? null : modelFavorite === market.favorite;
 
   return {
     game_id: gameId,
@@ -169,11 +183,13 @@ async function compareGameEdge(gameId) {
     market_margin: market.margin,
     market_source: market.source,
     edge: agrees === null ? null : !agrees, // a disagreement is what's worth a second look
-    note: agrees === null
-      ? "Not enough signal on one side, or the market is a pick-'em, to compare a direction."
-      : agrees
-        ? `Model's offensive-skill lean and the market's ${market.source} favorite agree (${market.favorite}).`
-        : `Model's offensive-skill lean favors ${modelFavorite} (by ${modelMargin === null ? 'n/a' : modelMargin.toFixed(1)}), but the market's ${market.source} favors ${market.favorite} — worth a closer look, more so if that margin is wide than if it's thin.`,
+    note: weakBasis
+      ? `Only ${modelFavorite === 'home' ? 'the home' : 'the away'} team has any matchup-score signal for this game yet — too thin a basis to compare directions.`
+      : agrees === null
+        ? "Not enough signal on one side, or the market is a pick-'em, to compare a direction."
+        : agrees
+          ? `Model's offensive-skill lean and the market's ${market.source} favorite agree (${market.favorite}).`
+          : `Model's offensive-skill lean favors ${modelFavorite} (by ${modelMargin === null ? 'n/a' : modelMargin.toFixed(1)}), but the market's ${market.source} favors ${market.favorite} — worth a closer look, more so if that margin is wide than if it's thin.`,
   };
 }
 

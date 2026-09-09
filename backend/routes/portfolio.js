@@ -22,12 +22,11 @@
  */
 
 const express = require('express');
-const { buildSlate } = require('../lib/portfolio');
+const { buildSlate, MAX_MAX_PICKS } = require('../lib/portfolio');
 
 const router = express.Router();
 
 const DEFAULT_MAX_PICKS = 5;
-const MAX_MAX_PICKS = 20;
 const DEFAULT_UNIT_SIZE = 1;
 
 router.post('/slate', async (req, res) => {
