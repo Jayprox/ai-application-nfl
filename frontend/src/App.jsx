@@ -6,11 +6,14 @@ import TeamBrowsePage from './pages/TeamBrowsePage';
 import TeamDetailPage from './pages/TeamDetailPage';
 import PlayerBrowsePage from './pages/PlayerBrowsePage';
 import PlayerDetailPage from './pages/PlayerDetailPage';
+import PicksPage from './pages/PicksPage';
 import NotFoundPage from './pages/NotFoundPage';
 
 // Route tree mirrors the 5-screen inventory from
 // docs/vibe-coding-checklist.md Phase 4 exactly: Login is public; every
 // other screen sits behind ProtectedRoute + the shared Layout (nav shell).
+// PicksPage (Part 2's first user-facing surface) added on top of the
+// original 5 — read-only wiring against the existing picks_log routes.
 export default function App() {
   return (
     <Routes>
@@ -23,6 +26,7 @@ export default function App() {
           <Route path="teams/:teamId" element={<TeamDetailPage />} />
           <Route path="players" element={<PlayerBrowsePage />} />
           <Route path="players/:playerId" element={<PlayerDetailPage />} />
+          <Route path="picks" element={<PicksPage />} />
         </Route>
       </Route>
 

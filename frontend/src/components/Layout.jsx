@@ -29,6 +29,9 @@ export default function Layout() {
             <NavLink to="/players" className={navLinkClass}>
               Players
             </NavLink>
+            <NavLink to="/picks" className={navLinkClass}>
+              Picks
+            </NavLink>
             <button
               type="button"
               onClick={handleLogout}
