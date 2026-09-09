@@ -230,10 +230,21 @@ async function resolveIdentity(source, sourcePlayerId, candidate, cache) {
     return crosswalked[0].player_id;
   }
 
+  // players.current_team_id is INT (teams.team_id is SERIAL, not a uuid --
+  // only players.player_id itself is a uuid). $3::uuid here was wrong and
+  // broke every call that reached this fallback match (i.e. any player not
+  // already in player_id_crosswalk -- rookies, first-year practice-squad
+  // adds, etc.): Postgres unifies a parameter's type across every use in
+  // one prepared statement, so casting $3 to uuid in the null-check forced
+  // `current_team_id = $3` to compare an int column against a uuid value,
+  // which Postgres has no operator for ("operator does not exist: integer
+  // = uuid") -- confirmed against a real failure in sync_roster's Sept 8
+  // logs. Uncaught, that exception killed the whole calling job (sync_roster
+  // / sync_historical_stats), not just the one row.
   const { rows: matches } = await pool.query(
     `SELECT player_id FROM players
      WHERE lower(full_name) = lower($1) AND position = $2
-       AND ($3::uuid IS NULL OR current_team_id = $3)
+       AND ($3::int IS NULL OR current_team_id = $3)
      LIMIT 2`,
     [candidate.fullName, candidate.position, candidate.teamId || null]
   );
