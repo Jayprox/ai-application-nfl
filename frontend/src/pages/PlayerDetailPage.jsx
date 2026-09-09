@@ -5,6 +5,7 @@ import { useStatsQuery } from '../hooks/useStatsQuery';
 import AsyncState from '../components/AsyncState';
 import InjuryBadge from '../components/InjuryBadge';
 import EmptyStatsMessage from '../components/EmptyStatsMessage';
+import PlayerInsights from '../components/PlayerInsights';
 import { STAT_COLUMNS_BY_POSITION_GROUP } from '../constants/statColumns';
 import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 
@@ -12,6 +13,9 @@ import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 // tabs (season/last5/career/game log), situational split filters
 // (home/away, time slot, weather), and the injury badge, all wired to
 // real data (POST /query and GET /players/:id's current_injury).
+// PlayerInsights (Part 2's insight layer, GET /insights/players/:id)
+// added below the header — see that component for why it's decoupled
+// from this page's own season/scope selectors.
 
 const selectClass =
   'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
@@ -116,6 +120,8 @@ export default function PlayerDetailPage() {
           {player.position} {player.team_name ? `· ${player.team_name}` : '· Free agent'}
         </p>
       </div>
+
+      <PlayerInsights playerId={playerId} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="flex rounded-md border border-slate-200 bg-white p-0.5">
