@@ -21,9 +21,25 @@ import AsyncState from '../components/AsyncState';
  * reuse (worker/ingestion-worker.js's currentNflSeason() only resolves
  * the season) — that's the first thing to add if a real "this week's
  * board" view is wanted later.
+ *
+ * SEASONS is deliberately just the two most recent years, not the same
+ * 6-year AVAILABLE_SEASONS list PlayerDetailPage uses for real historical
+ * game stats. matchup_scores isn't a historical table at all — it's a
+ * forward-looking cache scripts/compute-matchup-scores.js recomputes for
+ * one season at a time (worker/ingestion-worker.js's currentNflSeason()
+ * logic), so anything older than "last season" will structurally never
+ * have rows, unlike *_game_stats which genuinely does hold multi-year
+ * history. Confirmed empty as of 2026-09-10 for 2024/2023/2022/2021 —
+ * only LAST_SEASON currently has data, since this season's cron hasn't
+ * populated CURRENT_SEASON yet. Once it does, both options here will
+ * have real rows; if CURRENT_SEASON stays empty for a while after this
+ * season's games start, that's the next thing worth checking (is the
+ * cron running?), not a frontend bug.
  */
 
-const AVAILABLE_SEASONS = [2026, 2025, 2024, 2023, 2022, 2021];
+const CURRENT_SEASON = 2026;
+const LAST_SEASON = 2025;
+const SEASONS = [CURRENT_SEASON, LAST_SEASON];
 
 const STAT_CATEGORY_LABEL = {
   passing_yards: 'Passing yards',
@@ -50,7 +66,7 @@ function formatSyncedAt(iso) {
 
 export default function RankingsPage() {
   const [statCategory, setStatCategory] = useState('passing_yards');
-  const [season, setSeason] = useState(AVAILABLE_SEASONS[0]);
+  const [season, setSeason] = useState(LAST_SEASON);
   const [weekInput, setWeekInput] = useState('');
 
   const rankingsPath = useMemo(() => {
@@ -80,7 +96,7 @@ export default function RankingsPage() {
           ))}
         </select>
         <select value={season} onChange={(e) => setSeason(Number(e.target.value))} className={selectClass}>
-          {AVAILABLE_SEASONS.map((yr) => (
+          {SEASONS.map((yr) => (
             <option key={yr} value={yr}>
               {yr}
             </option>
