@@ -35,6 +35,9 @@ export default function Layout() {
             <NavLink to="/leaderboard" className={navLinkClass}>
               Leaderboard
             </NavLink>
+            <NavLink to="/rankings" className={navLinkClass}>
+              Rankings
+            </NavLink>
             <button
               type="button"
               onClick={handleLogout}

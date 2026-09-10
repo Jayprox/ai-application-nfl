@@ -8,6 +8,7 @@ import PlayerBrowsePage from './pages/PlayerBrowsePage';
 import PlayerDetailPage from './pages/PlayerDetailPage';
 import PicksPage from './pages/PicksPage';
 import LeaderboardPage from './pages/LeaderboardPage';
+import RankingsPage from './pages/RankingsPage';
 import NotFoundPage from './pages/NotFoundPage';
 
 // Route tree mirrors the 5-screen inventory from
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="players/:playerId" element={<PlayerDetailPage />} />
           <Route path="picks" element={<PicksPage />} />
           <Route path="leaderboard" element={<LeaderboardPage />} />
+          <Route path="rankings" element={<RankingsPage />} />
         </Route>
       </Route>
 
