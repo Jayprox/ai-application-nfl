@@ -14,6 +14,18 @@
  *
  * GET /picks              — list picks, most recent first.
  *                            ?agent_name=, ?status=, ?game_id=, ?player_id=
+ *                            Each row includes the full matchup
+ *                            (home_team_abbr/away_team_abbr, season,
+ *                            week, game_datetime) via a join through
+ *                            games — not just the picked side's team —
+ *                            so a client can show "SEA @ CLE" context
+ *                            without a second request. Previously only
+ *                            predicted_team_abbr (the picked side) was
+ *                            returned; the frontend's own reasoning text
+ *                            covered most of the gap in the meantime, but
+ *                            a real join is more useful and no more
+ *                            expensive than the two team joins this
+ *                            route already did.
  * GET /picks/stats         — hit-rate summary (optionally ?agent_name=).
  *                            Same "pushes/voids excluded from the hit-rate
  *                            denominator" convention as grade_picks' own
@@ -108,10 +120,15 @@ router.get('/', async (req, res) => {
               pl.stat_category, pl.predicted_direction, pl.predicted_line,
               pl.market, pl.predicted_team_id, t.abbreviation AS predicted_team_abbr, pl.units,
               pl.confidence, pl.reasoning,
-              pl.status, pl.actual_value, pl.graded_at, pl.created_at
+              pl.status, pl.actual_value, pl.graded_at, pl.created_at,
+              g.season, g.week, g.game_datetime,
+              home_t.abbreviation AS home_team_abbr, away_t.abbreviation AS away_team_abbr
        FROM picks_log pl
        LEFT JOIN players p ON p.player_id = pl.player_id
        LEFT JOIN teams t ON t.team_id = pl.predicted_team_id
+       LEFT JOIN games g ON g.game_id = pl.game_id
+       LEFT JOIN teams home_t ON home_t.team_id = g.home_team_id
+       LEFT JOIN teams away_t ON away_t.team_id = g.away_team_id
        ${whereClause}
        ORDER BY pl.created_at DESC
        LIMIT ${MAX_RESULTS}`,

@@ -15,13 +15,10 @@ import AsyncState from '../components/AsyncState';
  * first thing to revisit — either a picker dropdown or an unfiltered
  * "all agents" view grouped by agent_name.
  *
- * Known limitation, deliberately not fixed here: GET /picks returns the
- * picked side's team (predicted_team_abbr) but not the opponent, since
- * the route doesn't join games/teams for the other side. The pick's own
- * reasoning text (written by lib/edge.js / lib/portfolio.js) describes
- * the matchup in home/away terms, which covers most of the gap — full
- * "TEAM @ TEAM" context would need a small join added to routes/picks.js,
- * left for a follow-up rather than bundled into this first cut.
+ * Full matchup context (away_team_abbr @ home_team_abbr) comes straight
+ * off GET /picks now — routes/picks.js joins through games/teams for
+ * both sides, not just the picked one, so MatchupLine below needs no
+ * extra request.
  * =========================================================================
  */
 
@@ -56,6 +53,21 @@ function StatTile({ label, value }) {
     <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-center">
       <div className="text-lg font-semibold text-slate-900">{value}</div>
       <div className="text-xs text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+// "away @ home", with whichever side was actually picked bolded — a
+// player_stat pick has no predicted_team_abbr, so neither side bolds,
+// which is correct (that pick isn't about a side at all).
+function MatchupLine({ pick }) {
+  if (!pick.away_team_abbr || !pick.home_team_abbr) return null;
+  const awayClass = pick.predicted_team_abbr === pick.away_team_abbr ? 'font-semibold text-slate-700' : '';
+  const homeClass = pick.predicted_team_abbr === pick.home_team_abbr ? 'font-semibold text-slate-700' : '';
+  return (
+    <div className="text-xs text-slate-400">
+      {pick.week ? `Week ${pick.week} · ` : ''}
+      <span className={awayClass}>{pick.away_team_abbr}</span> @ <span className={homeClass}>{pick.home_team_abbr}</span>
     </div>
   );
 }
@@ -121,7 +133,8 @@ export default function PicksPage() {
             <li key={pick.pick_id} className="rounded-md border border-slate-200 bg-white px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-medium text-slate-900 text-sm">{pickSummary(pick)}</div>
+                  <MatchupLine pick={pick} />
+                  <div className="mt-0.5 font-medium text-slate-900 text-sm">{pickSummary(pick)}</div>
                   {pick.reasoning && <p className="mt-1 text-xs text-slate-500">{pick.reasoning}</p>}
                   <p className="mt-1 text-xs text-slate-400">
                     Logged {new Date(pick.created_at).toLocaleString()}
