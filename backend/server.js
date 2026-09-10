@@ -24,6 +24,7 @@ const matchupScoresRoutes = require('./routes/matchup-scores');
 const rankingsRoutes = require('./routes/rankings');
 const edgeRoutes = require('./routes/edge');
 const portfolioRoutes = require('./routes/portfolio');
+const leaderboardRoutes = require('./routes/leaderboard');
 
 const app = express();
 app.use(express.json());
@@ -100,6 +101,10 @@ app.use('/edge', edgeRoutes);
 // same grade_picks job (worker/ingestion-worker.js) tracks its hit rate.
 // See routes/portfolio.js and lib/portfolio.js.
 app.use('/portfolio', portfolioRoutes);
+// Leaderboard — ranks every agent logging picks to picks_log by hit
+// rate. See routes/leaderboard.js for why it's agent-ranked rather
+// than PNL-ranked today.
+app.use('/leaderboard', leaderboardRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
