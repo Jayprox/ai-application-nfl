@@ -36,15 +36,21 @@
  *   2. recent_form    — last-3-games average vs. this player's own
  *                       season average (MLB's hot/cold-streak equivalent).
  *   3. situational     — this player's stat average in their next game's
- *                       home/away or game_slot context vs. their own
- *                       season average — reuses the exact split
- *                       dimensions POST /query already supports
- *                       (architecture.md §3). Whichever dimension has an
+ *                       home/away, game_slot, or weather context vs.
+ *                       their own season average — reuses the exact
+ *                       split dimensions POST /query already supports
+ *                       (architecture.md §3) plus a weather bucket
+ *                       (adverse: rain/snow vs. clear: sunny/overcast/
+ *                       dome — see weatherBucket()'s own comment for why
+ *                       it's grouped rather than matched on the exact
+ *                       5-value enum). Whichever dimension has an
  *                       adequate sample (>=2 games) and the larger
- *                       deviation is reported; weather isn't used here
- *                       since it's usually still NULL for games this far
- *                       out (see sync_forecast_weather's proximity
- *                       schedule).
+ *                       deviation is reported. Weather only enters the
+ *                       comparison once the upcoming game's own forecast
+ *                       has actually synced (see sync_forecast_weather's
+ *                       proximity schedule) — a game more than ~10 days
+ *                       out still won't have one, same graceful-null
+ *                       behavior as before.
  *   4. role_trend      — last-3-games volume stat (targets/carries/
  *                       attempts/tackle involvement) vs. the 3 games
  *                       before that, i.e. whether a player's role is
@@ -100,6 +106,34 @@ function ratioLabel(recent, baseline, { hotAt = 1.2, coldAt = 0.8, hotLabel, col
   if (ratio <= coldAt) return coldLabel;
   return neutralLabel;
 }
+
+// Buckets the 5-value weather_condition_enum ('sunny' | 'overcast' |
+// 'rain' | 'snow' | 'dome' — see query.js's VALID_WEATHER) into two
+// groups for the situational split below. Matching on the exact enum
+// value (e.g. only 'rain' vs. only 'rain') would almost never reach
+// MIN_GAMES_FOR_SPLIT within one season — most games are 'sunny' or
+// 'overcast', so a player might see zero or one 'rain' game all year.
+// Rain and snow both meaningfully disrupt a passing/kicking game in
+// practice, so grouping them into one "adverse" bucket (vs. "clear" for
+// everything else, dome included) is a known simplification in the same
+// spirit as query.js's punt_avg note — it trades precision for actually
+// having a sample to compare, rather than a split that structurally
+// almost never fires.
+function weatherBucket(condition) {
+  if (condition === 'rain' || condition === 'snow') return 'adverse';
+  if (condition === 'sunny' || condition === 'overcast' || condition === 'dome') return 'clear';
+  return null;
+}
+
+const WEATHER_BUCKET_CONDITIONS = {
+  adverse: ['rain', 'snow'],
+  clear: ['sunny', 'overcast', 'dome'],
+};
+
+const WEATHER_BUCKET_LABEL = {
+  adverse: 'in rain/snow games',
+  clear: 'in clear-weather games',
+};
 
 // ---------------------------------------------------------------------
 // 1. Matchup strength (offensive skill positions only — see file header)
@@ -232,7 +266,7 @@ async function computeSituational({ playerId, teamId, season, statConfig }) {
   }
 
   const { rows: nextGameRows } = await query(
-    `SELECT game_slot, home_team_id, away_team_id
+    `SELECT game_slot, home_team_id, away_team_id, weather_condition
      FROM games
      WHERE (home_team_id = $1 OR away_team_id = $1) AND status = 'scheduled'
      ORDER BY game_datetime ASC LIMIT 1`,
@@ -254,6 +288,19 @@ async function computeSituational({ playerId, teamId, season, statConfig }) {
     whereExtra: 'AND g.game_slot = $3',
     params: [nextGame.game_slot],
   });
+  // Only attempted once the upcoming game's own forecast has synced —
+  // weather_condition is still NULL for anything more than ~10 days out
+  // (sync_forecast_weather's proximity schedule, worker/ingestion-
+  // worker.js). nextWeatherBucket stays null until then, same as any
+  // other "not enough data yet" case below.
+  const nextWeatherBucket = weatherBucket(nextGame.weather_condition);
+  const weatherSplit = nextWeatherBucket
+    ? await splitAverage({
+        playerId, season, statConfig,
+        whereExtra: 'AND g.weather_condition = ANY($3)',
+        params: [WEATHER_BUCKET_CONDITIONS[nextWeatherBucket]],
+      })
+    : null;
 
   const candidates = [];
   if (homeAwaySplit && homeAwaySplit.sampleSize >= MIN_GAMES_FOR_SPLIT) {
@@ -262,8 +309,11 @@ async function computeSituational({ playerId, teamId, season, statConfig }) {
   if (gameSlotSplit && gameSlotSplit.sampleSize >= MIN_GAMES_FOR_SPLIT) {
     candidates.push({ ...gameSlotSplit, contextLabel: `in ${nextGame.game_slot.replace(/_/g, ' ')} games` });
   }
+  if (weatherSplit && weatherSplit.sampleSize >= MIN_GAMES_FOR_SPLIT) {
+    candidates.push({ ...weatherSplit, contextLabel: WEATHER_BUCKET_LABEL[nextWeatherBucket] });
+  }
   if (!candidates.length) {
-    return { category: 'situational', label: null, note: 'Not enough games yet in this player\'s upcoming home/away or game-slot context for a reliable split.' };
+    return { category: 'situational', label: null, note: 'Not enough games yet in this player\'s upcoming home/away, game-slot, or weather context for a reliable split.' };
   }
 
   // Prefer whichever candidate deviates furthest from the season average.
