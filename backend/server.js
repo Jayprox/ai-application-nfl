@@ -27,6 +27,17 @@ const portfolioRoutes = require('./routes/portfolio');
 const leaderboardRoutes = require('./routes/leaderboard');
 
 const app = express();
+
+// Railway's edge terminates TLS and proxies every request through, so
+// without this Express sees the proxy as the client on every request —
+// req.ip (and req.ips) would return the same internal address for
+// everyone, which would make the per-IP rate limiting on /login and
+// /refresh (routes/auth.js, lib/rate-limit.js) useless: every caller
+// would share one bucket instead of getting their own. `1` trusts
+// exactly one hop of X-Forwarded-For, matching Railway's single edge
+// proxy in front of this service.
+app.set('trust proxy', 1);
+
 app.use(express.json());
 
 // The React web app (and Swift iOS later) is now a real browser client
