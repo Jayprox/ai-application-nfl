@@ -25,6 +25,7 @@ const rankingsRoutes = require('./routes/rankings');
 const edgeRoutes = require('./routes/edge');
 const portfolioRoutes = require('./routes/portfolio');
 const leaderboardRoutes = require('./routes/leaderboard');
+const chatRoutes = require('./routes/chat');
 
 const app = express();
 
@@ -116,6 +117,13 @@ app.use('/portfolio', portfolioRoutes);
 // rate. See routes/leaderboard.js for why it's agent-ranked rather
 // than PNL-ranked today.
 app.use('/leaderboard', leaderboardRoutes);
+// Orchestrator/chat agent (Part 2 Phase 2, docs/part2-roadmap.md) — the
+// 5th agent, read-only v1: answers questions by calling the same
+// rankings/edge/insights/picks/leaderboard data the other tabs use. The
+// first place in this codebase that calls an LLM at all. See
+// lib/orchestrator.js for the tool-calling loop and why it never
+// generates or logs a new pick itself.
+app.use('/chat', chatRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw

@@ -41,6 +41,9 @@ export default function Layout() {
             <NavLink to="/edge" className={navLinkClass}>
               Edge
             </NavLink>
+            <NavLink to="/chat" className={navLinkClass}>
+              Chat
+            </NavLink>
             <button
               type="button"
               onClick={handleLogout}
