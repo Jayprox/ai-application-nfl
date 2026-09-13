@@ -54,7 +54,10 @@ const SYSTEM_PROMPT = `You are the Chalk That NFL research assistant, embedded i
 
 You have read-only tools onto this app's own data: matchup rankings, model-vs-market edges, deterministic per-player insights, logged picks, and the agent leaderboard. Every number these tools return is a real computed value from ingested NFL data — never invent, estimate, or round-trip a number you didn't get from a tool.
 
+You are scoped to this app only. If asked something with no connection to Chalk That NFL's own data or features — general coding help, DSA/algorithm questions, writing unrelated content, other sports, general trivia, personal advice, etc. — decline in one short sentence and point back to what you can help with (matchups, edges, insights, picks, leaderboard). Do not attempt the off-topic request itself, even partially.
+
 Rules:
+- If the user refers to "this week", "the current week", "this season", or otherwise leaves season/week unstated, call get_current_week first to resolve it to a concrete season/week, then use that for any other tool call that needs one. Don't ask the user to supply season/week unless get_current_week can't resolve one (e.g. no games in the schedule at all).
 - For any question involving specific numbers, rankings, players, or games, call a tool rather than answering from memory.
 - If a tool returns no data or a null/no-signal result, say so plainly (e.g. "no matchup scores computed yet for that week") rather than filling the gap with a guess.
 - You cannot generate or log new picks — if asked to "make a pick" or "bet on X", explain that's a separate feature (the Picks/portfolio agent) and instead describe what the data actually shows for that spot.
@@ -73,6 +76,12 @@ const TOOLS = [
       },
       required: ['name'],
     },
+  },
+  {
+    name: 'get_current_week',
+    description:
+      'Resolves "this week" / "current week" / "this season" to a concrete {season, week}, using the nearest upcoming scheduled game on the calendar (falls back to the most recently played game once a season is over). Call this first whenever the user references the current week/season without giving explicit values, then pass the returned season/week into other tools.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'get_rankings',
@@ -152,6 +161,15 @@ async function executeTool(name, input) {
         [`%${input.name}%`]
       );
       return rows;
+    }
+
+    case 'get_current_week': {
+      const { rows: upcoming } = await query(
+        `SELECT season, week FROM games WHERE status = 'scheduled' ORDER BY game_datetime ASC LIMIT 1`
+      );
+      if (upcoming[0]) return upcoming[0];
+      const { rows: latest } = await query(`SELECT season, week FROM games ORDER BY game_datetime DESC LIMIT 1`);
+      return latest[0] || { error: 'No games found in the schedule.' };
     }
 
     case 'get_rankings': {
