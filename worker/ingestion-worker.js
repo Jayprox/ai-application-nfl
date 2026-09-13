@@ -682,16 +682,48 @@ async function syncForecastWeather() {
 const HIGHLIGHTLY_HOST = 'nfl-ncaa-highlights-api.p.rapidapi.com';
 const HIGHLIGHTLY_BASE = `https://${HIGHLIGHTLY_HOST}`;
 
+// Circuit breaker: CONFIRMED necessary 2026-09-13, the Sunday after the
+// module-scope-cache fix above went live. That fix stops a game's match id
+// from being re-resolved once it's found -- but on a day where the 100/day
+// quota is already exhausted (or Highlightly is otherwise erroring, e.g.
+// the 403 "not subscribed" seen the same day on one lookup), EVERY /matches
+// call fails, so "only cache a CONFIRMED no-match" means nothing ever gets
+// cached. Without a breaker, that means every job tick -- sync_live_stats
+// roughly every 20-50s during a live window, sync_injury_reports every 3h
+// -- retries the FULL batch of unresolved games from scratch against an API
+// that's already saying no. Once any call 429s, back off ALL Highlightly
+// traffic (matches, match detail, box score alike -- the failures aren't
+// endpoint-specific) for a cooldown window, so a bad day degrades to one
+// checked-and-skipped attempt per window instead of a continuous hammer.
+const HIGHLIGHTLY_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+let highlightlyCooldownUntil = 0;
+
+function highlightlyOnCooldown() {
+  return Date.now() < highlightlyCooldownUntil;
+}
+
+function noteHighlightly429() {
+  highlightlyCooldownUntil = Date.now() + HIGHLIGHTLY_COOLDOWN_MS;
+}
+
 async function fetchHighlightly(path, params = {}) {
+  if (highlightlyOnCooldown()) {
+    throw new Error(`Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429)`);
+  }
   const query = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== null)
   ).toString();
   const url = `${HIGHLIGHTLY_BASE}${path}${query ? `?${query}` : ''}`;
-  const text = await fetchTextWithHeaders(url, {
-    'x-rapidapi-key': process.env.HIGHLIGHTLY_API_KEY,
-    'x-rapidapi-host': HIGHLIGHTLY_HOST,
-  });
-  return JSON.parse(text);
+  try {
+    const text = await fetchTextWithHeaders(url, {
+      'x-rapidapi-key': process.env.HIGHLIGHTLY_API_KEY,
+      'x-rapidapi-host': HIGHLIGHTLY_HOST,
+    });
+    return JSON.parse(text);
+  } catch (err) {
+    if (/HTTP 429/.test(err.message)) noteHighlightly429();
+    throw err;
+  }
 }
 
 async function loadTeamNameMap() {
@@ -752,6 +784,11 @@ const highlightlyMatchCache = new Map();
 
 async function findHighlightlyMatch(game, abbrByTeamId, cache = highlightlyMatchCache) {
   if (cache.has(game.game_id)) return cache.get(game.game_id);
+  // Defense-in-depth: fetchHighlightly() itself also refuses calls during a
+  // cooldown, but bailing out here too skips the 3-candidate loop entirely
+  // instead of throwing-and-catching 3 times plus a "no match found" warning
+  // per game, per caller, every time this runs while a cooldown is active.
+  if (highlightlyOnCooldown()) return null;
 
   const homeAbbr = abbrByTeamId[game.home_team_id];
   const awayAbbr = abbrByTeamId[game.away_team_id];
@@ -843,14 +880,29 @@ async function syncInjuryReports() {
     console.warn('[job:sync_injury_reports] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
     return { recordsProcessed: 0 };
   }
+  if (highlightlyOnCooldown()) {
+    console.warn(`[job:sync_injury_reports] Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429s) — skipping this run`);
+    return { recordsProcessed: 0 };
+  }
 
+  // Window narrowed from 8 days to 4 -- CONFIRMED problem 2026-09-13: on a
+  // live Sunday, "next 8 days" pulls in next week's entire slate (its
+  // Thursday/Sunday/Monday games too), so every 3-hour tick was resolving
+  // Highlightly match ids for ~2 weeks of games at once, on top of whatever
+  // sync_live_stats was already doing for today's live games -- more than
+  // enough by itself to blow the 100/day quota before today's games even
+  // finish. 4 days still covers this week's remaining games from any day
+  // Mon-Sat, and by Wed-Fri it already reaches into the *next* Sunday, which
+  // is when real injury designations (practice-report-driven) start
+  // appearing anyway -- it just no longer re-sweeps a whole next week's
+  // worth of games while this week's slate is still live.
   const { rows: games } = await pool.query(
     `SELECT game_id, season, week, home_team_id, away_team_id, game_datetime
      FROM games
-     WHERE status = 'scheduled' AND game_datetime BETWEEN now() AND now() + interval '8 days'`
+     WHERE status = 'scheduled' AND game_datetime BETWEEN now() AND now() + interval '4 days'`
   );
   if (!games.length) {
-    console.log('[job:sync_injury_reports] no upcoming games in the next 8 days');
+    console.log('[job:sync_injury_reports] no upcoming games in the next 4 days');
     return { recordsProcessed: 0 };
   }
 
@@ -1069,6 +1121,10 @@ async function resolvePlayerForBoxScore(vendorPlayerId, fullName, teamId, cache)
 async function syncLiveStats() {
   if (!process.env.HIGHLIGHTLY_API_KEY) {
     console.warn('[job:sync_live_stats] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+  if (highlightlyOnCooldown()) {
+    console.warn(`[job:sync_live_stats] Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429s) — skipping this tick`);
     return { recordsProcessed: 0 };
   }
 
