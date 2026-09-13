@@ -25,13 +25,16 @@
  * to MAX_TOOL_ROUNDS rounds of tool_use before giving up, so a confused
  * model can't loop forever racking up API cost against one chat message.
  *
- * ANTHROPIC_MODEL is deliberately an env var, not a hardcoded default
- * baked in here — model names/availability change over time and this
- * was written well after this codebase's own knowledge of "what's
- * current" could be stale. Set it in Railway once you've checked
- * console.anthropic.com for whatever the current small/fast model is;
- * the fallback below is a real model id as of when this was written, not
- * a guess, but treat it as a placeholder to double-check, not gospel.
+ * ANTHROPIC_MODEL is deliberately an env var, not only a hardcoded
+ * default — model names/availability change over time. The fallback
+ * below (claude-haiku-4-5-20251001) was confirmed live against
+ * platform.claude.com/docs on 2026-09-13 as Anthropic's current
+ * fastest/cheapest tool-use-capable model, after an earlier guess here
+ * (claude-3-5-haiku-20241022, a pre-2025 naming scheme) 404'd against
+ * the real API the first time this was actually exercised end to end.
+ * If this starts 404ing again down the line, that's model retirement,
+ * not a bug — check platform.claude.com/docs and set ANTHROPIC_MODEL in
+ * Railway rather than trusting this default indefinitely.
  * =========================================================================
  */
 
@@ -42,7 +45,7 @@ const { computePlayerInsights } = require('./insights');
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022';
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 1024;
 const MAX_TOOL_ROUNDS = 4;
 const TOOL_RESULT_CHAR_CAP = 8000; // keeps one bad query result from blowing up the token budget
