@@ -52,7 +52,7 @@ function EdgeBadge({ edge }) {
 }
 
 export default function EdgePage() {
-  const [season, setSeason] = useState(LAST_SEASON);
+  const [season, setSeason] = useState(CURRENT_SEASON);
   const [weekInput, setWeekInput] = useState('1');
   const [onlyDisagreements, setOnlyDisagreements] = useState(false);
 

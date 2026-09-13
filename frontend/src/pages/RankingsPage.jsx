@@ -66,7 +66,7 @@ function formatSyncedAt(iso) {
 
 export default function RankingsPage() {
   const [statCategory, setStatCategory] = useState('passing_yards');
-  const [season, setSeason] = useState(LAST_SEASON);
+  const [season, setSeason] = useState(CURRENT_SEASON);
   const [weekInput, setWeekInput] = useState('');
 
   const rankingsPath = useMemo(() => {

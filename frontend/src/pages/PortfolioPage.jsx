@@ -40,7 +40,7 @@ const numberInputClass =
   'w-28 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900';
 
 export default function PortfolioPage() {
-  const [season, setSeason] = useState(LAST_SEASON);
+  const [season, setSeason] = useState(CURRENT_SEASON);
   const [weekInput, setWeekInput] = useState('1');
   const [maxPicksInput, setMaxPicksInput] = useState('5');
   const [unitSizeInput, setUnitSizeInput] = useState('1');
