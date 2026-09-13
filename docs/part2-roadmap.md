@@ -170,4 +170,30 @@ actually shipped:
 - Confirm the 2026-09-13 Highlightly quota-cache fix holds up across a
   full Sunday slate of concurrent live games, not just the first one
   observed.
+- **2026-09-13, backlog — refresh cadence lags same-day results.**
+  `sync_historical_stats` (once every 24h) and `matchup-scores-cron`
+  (`0 10 * * *` UTC, once daily) are both fixed-schedule, so a Sunday's
+  games finishing through the afternoon/evening don't reach Rankings/
+  Season avg/matchup scores until the *next* day's runs — confirmed live:
+  Brock Purdy (49ers/Rams already final) showed a synced game, Jalen
+  Hurts (game still in progress) showed none. The pipeline is working
+  correctly, just once-a-day. Not fixed yet — needs more research before
+  picking an approach. Candidates, undecided:
+    1. A manual re-trigger (endpoint or script) to force both jobs
+       on demand — cheapest, no schedule change, but relies on someone
+       remembering to run it.
+    2. Multiple scheduled runs on Sundays keyed to typical NFL window
+       end times (proposed: 4:30pm, 7:45pm, 11:30pm ET) instead of the
+       single daily run — easy to add as more cron triggers, but the
+       times are a guess at real broadcast-window ends that needs
+       validating against an actual Sunday slate, and anything finishing
+       off-schedule (weather delay, overtime) still waits for the next
+       window.
+    3. True live scoring off `sync_live_stats`'s already-live box scores
+       (it writes into the same tables every 20s during a live game) —
+       the biggest lift, and not just an engineering one: needs a real
+       product call on whether a score built from a partial game is
+       honest to show as the same kind of number as one built from a
+       final game, plus what recent-form/role-trend even mean when this
+       week's own game isn't done yet.
 - Phase 3 (frontend redesign) — scope and timing not yet decided.
