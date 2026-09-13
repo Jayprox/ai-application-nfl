@@ -222,12 +222,25 @@ async function computeRecentForm({ playerId, season, statConfig }) {
      ORDER BY g.game_datetime ASC`,
     [playerId, season]
   );
-  if (rows.length < MIN_GAMES_FOR_FORM) {
-    return { category: 'recent_form', label: null, note: `Only ${rows.length} game(s) played this season — not enough for a recent-form read (need ${MIN_GAMES_FOR_FORM}+).` };
+  // gamesPlayed/seasonAvg are returned alongside the label/note on every
+  // path below (even the label:null ones) — not used by the label logic
+  // itself, but reused by matchup-score.js purely for display (a "season
+  // avg" column next to the trend score, see docs discussion re: Rankings
+  // ranking backups above starters on trend alone). Null seasonAvg when
+  // the player has 0 games played this season, same graceful-empty
+  // convention as label: null elsewhere in this file.
+  const gamesPlayed = rows.length;
+  if (gamesPlayed === 0) {
+    return { category: 'recent_form', label: null, note: 'No games played this season yet.', gamesPlayed, seasonAvg: null };
   }
 
   const values = rows.map((r) => Number(r.val || 0));
   const seasonAvg = values.reduce((a, b) => a + b, 0) / values.length;
+
+  if (gamesPlayed < MIN_GAMES_FOR_FORM) {
+    return { category: 'recent_form', label: null, note: `Only ${gamesPlayed} game(s) played this season — not enough for a recent-form read (need ${MIN_GAMES_FOR_FORM}+).`, gamesPlayed, seasonAvg };
+  }
+
   const recentValues = values.slice(-RECENT_WINDOW);
   const recentAvg = recentValues.reduce((a, b) => a + b, 0) / recentValues.length;
 
@@ -236,7 +249,7 @@ async function computeRecentForm({ playerId, season, statConfig }) {
   });
   const note = `Averaging ${recentAvg.toFixed(1)} ${statConfig.statLabel} over the last ${RECENT_WINDOW} games vs. a ${seasonAvg.toFixed(1)} season average.`;
 
-  return { category: 'recent_form', label, note };
+  return { category: 'recent_form', label, note, gamesPlayed, seasonAvg, recentAvg };
 }
 
 // ---------------------------------------------------------------------

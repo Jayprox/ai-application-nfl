@@ -48,6 +48,17 @@ const STAT_CATEGORY_LABEL = {
   tackles: 'Tackles',
 };
 
+// Short unit suffix for the season-avg column — reuses the same stat
+// vocabulary as STAT_CATEGORY_LABEL rather than a second copy of the
+// position->stat mapping (see backend/lib/ranking.js's header for why
+// stat_category already implies exactly one column of matchup_scores).
+const STAT_CATEGORY_UNIT = {
+  passing_yards: 'pass yds/gm',
+  rushing_yards: 'rush yds/gm',
+  receiving_yards: 'rec yds/gm',
+  tackles: 'tkl/gm',
+};
+
 const selectClass =
   'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
 
@@ -147,6 +158,7 @@ export default function RankingsPage() {
                   <th className="py-2 pr-4">Pos</th>
                   <th className="py-2 pr-4">Score</th>
                   <th className="py-2 pr-4">Signal</th>
+                  <th className="py-2 pr-4">Season avg</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +179,11 @@ export default function RankingsPage() {
                       >
                         {row.categories_used}/4
                       </span>
+                    </td>
+                    <td className="py-3 pr-4 text-slate-500">
+                      {row.season_avg != null
+                        ? `${Number(row.season_avg).toFixed(1)} ${STAT_CATEGORY_UNIT[statCategory]}${row.games_played != null ? ` (${row.games_played} gm)` : ''}`
+                        : '—'}
                     </td>
                   </tr>
                 ))}

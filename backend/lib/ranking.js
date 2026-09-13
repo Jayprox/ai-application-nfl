@@ -65,7 +65,8 @@ async function rankMatchups({ statCategory, season, week, limit }) {
 
   const { rows } = await query(
     `SELECT ms.player_id, p.full_name AS player_name, p.position,
-            ms.game_id, ms.score, ms.categories_used, ms.breakdown, ms.computed_at
+            ms.game_id, ms.score, ms.categories_used, ms.breakdown, ms.computed_at,
+            ms.games_played, ms.season_avg
      FROM matchup_scores ms
      JOIN players p ON p.player_id = ms.player_id
      JOIN games g ON g.game_id = ms.game_id
