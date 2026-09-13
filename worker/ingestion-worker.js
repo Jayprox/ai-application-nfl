@@ -727,17 +727,36 @@ function toHighlightlyAbbr(abbr) {
 // date + team abbreviation (their documented /matches filters). Tries the
 // game's UTC date first, then ±1 day — same tolerance idea as
 // findGameForOddsEntry's ±1 day window, in case Highlightly buckets a
-// late-kickoff game under a different calendar date than we do. Cached
-// per game_id for the rest of this job run (shared by both jobs below,
-// since both need the same match id).
-async function findHighlightlyMatch(game, abbrByTeamId, cache) {
+// late-kickoff game under a different calendar date than we do.
+//
+// Cached at MODULE scope (highlightlyMatchCache below), not per-job-run —
+// CONFIRMED root cause of a 429 storm against Highlightly's 100-req/day
+// free tier (2026-09-13): sync_live_stats polls every 20s during a live
+// game window, and with a cache scoped to a single job invocation, every
+// one of those ticks re-ran up to 3 /matches lookups per live game (plus
+// a /box-score call) from scratch — dozens of requests every 20 seconds,
+// which exhausts the whole daily quota within about a minute of the
+// first game window opening and 429s every other Highlightly call
+// (including sync_injury_reports's) for the rest of the day. A game's
+// Highlightly match id never changes once found, so resolving it once
+// and reusing it for the life of the worker process is correct, not just
+// cheaper.
+//
+// Only a CONFIRMED "no match" (a real, successful response with zero
+// results across all three date candidates) is cached permanently — a
+// lookup where every candidate errored (429, network blip, etc.) is left
+// UNCACHED so a later tick gets a genuine shot at it once the quota
+// window resets, instead of being poisoned as "no match" for the rest of
+// this process's lifetime.
+const highlightlyMatchCache = new Map();
+
+async function findHighlightlyMatch(game, abbrByTeamId, cache = highlightlyMatchCache) {
   if (cache.has(game.game_id)) return cache.get(game.game_id);
 
   const homeAbbr = abbrByTeamId[game.home_team_id];
   const awayAbbr = abbrByTeamId[game.away_team_id];
   if (!homeAbbr || !awayAbbr) {
-    cache.set(game.game_id, null);
-    return null;
+    return null; // no team data yet (shouldn't happen) — don't cache, might resolve later
   }
   const hlHomeAbbr = toHighlightlyAbbr(homeAbbr);
   const hlAwayAbbr = toHighlightlyAbbr(awayAbbr);
@@ -749,6 +768,7 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache) {
     return d.toISOString().slice(0, 10);
   });
 
+  let sawSuccessfulResponse = false;
   for (const date of dateCandidates) {
     let payload;
     try {
@@ -759,6 +779,7 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache) {
       console.warn(`[highlightly] /matches lookup failed for ${awayAbbr}@${homeAbbr} on ${date} (${err.message})`);
       continue;
     }
+    sawSuccessfulResponse = true;
     const matches = Array.isArray(payload) ? payload : payload?.data || [];
     if (matches.length) {
       cache.set(game.game_id, matches[0].id);
@@ -767,7 +788,9 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache) {
   }
 
   console.warn(`[highlightly] no match found for ${awayAbbr}@${homeAbbr} near ${game.game_datetime}`);
-  cache.set(game.game_id, null);
+  if (sawSuccessfulResponse) {
+    cache.set(game.game_id, null);
+  }
   return null;
 }
 
@@ -832,13 +855,12 @@ async function syncInjuryReports() {
   }
 
   const { abbrByTeamId } = await loadTeamNameMap();
-  const matchCache = new Map();
   const playerCache = new Map();
   const today = new Date().toISOString().slice(0, 10);
   let processed = 0;
 
   for (const game of games) {
-    const matchId = await findHighlightlyMatch(game, abbrByTeamId, matchCache);
+    const matchId = await findHighlightlyMatch(game, abbrByTeamId);
     if (!matchId) continue;
 
     let detail;
@@ -1054,7 +1076,6 @@ async function syncLiveStats() {
   if (!games.length) return { recordsProcessed: 0 };
 
   const { idByName, abbrByTeamId } = await loadTeamNameMap();
-  const matchCache = new Map();
   const identityCache = new Map();
 
   // Keyed by `${gameId}|${playerId}` so multiple stat lines for the same
@@ -1070,7 +1091,7 @@ async function syncLiveStats() {
   let processed = 0;
 
   for (const game of games) {
-    const matchId = await findHighlightlyMatch(game, abbrByTeamId, matchCache);
+    const matchId = await findHighlightlyMatch(game, abbrByTeamId);
     if (!matchId) continue;
 
     let boxScore;
