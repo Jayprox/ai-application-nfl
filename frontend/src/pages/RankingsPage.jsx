@@ -64,6 +64,19 @@ function formatSyncedAt(iso) {
   return `computed ${Math.round(diffHours / 24)}d ago`;
 }
 
+// categories_used (0-4) is how many of the ranking's 4 trend categories
+// (matchup/recent_form/situational/role_trend, see backend/lib/matchup-score.js)
+// actually had a real read for this player rather than label: null. A high
+// score built on only 1-2 real categories is much less meaningful than one
+// built on all 4 — this badge makes that visible instead of letting every
+// score look equally authoritative.
+function signalBadgeClass(categoriesUsed) {
+  const base = 'inline-block rounded-full px-2 py-0.5 text-xs font-medium';
+  if (categoriesUsed >= 3) return `${base} bg-emerald-50 text-emerald-700`;
+  if (categoriesUsed === 2) return `${base} bg-amber-50 text-amber-700`;
+  return `${base} bg-rose-50 text-rose-700`;
+}
+
 export default function RankingsPage() {
   const [statCategory, setStatCategory] = useState('passing_yards');
   const [season, setSeason] = useState(CURRENT_SEASON);
@@ -85,6 +98,9 @@ export default function RankingsPage() {
       <p className="text-sm text-slate-500 mb-4">
         Top matchup scores for one stat category — the ranking agent's read on which players have the most
         favorable spot this week, purely from matchup/form/situational/role-trend signal, no market data involved.
+        This is a trend score, not a production ranking: a player can score high off one strongly favorable
+        category even with a thin track record this season — check the Signal badge (how many of the 4
+        categories actually had a real read) before treating a high score as "this player will put up big numbers."
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
@@ -130,6 +146,7 @@ export default function RankingsPage() {
                   <th className="py-2 pr-4">Player</th>
                   <th className="py-2 pr-4">Pos</th>
                   <th className="py-2 pr-4">Score</th>
+                  <th className="py-2 pr-4">Signal</th>
                 </tr>
               </thead>
               <tbody>
@@ -143,6 +160,14 @@ export default function RankingsPage() {
                     </td>
                     <td className="py-3 pr-4 text-slate-500">{row.position}</td>
                     <td className="py-3 pr-4 font-medium text-slate-900">{Number(row.score).toFixed(1)}</td>
+                    <td className="py-3 pr-4">
+                      <span
+                        className={signalBadgeClass(row.categories_used)}
+                        title={`${row.categories_used} of 4 trend categories had a real read for this player`}
+                      >
+                        {row.categories_used}/4
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
