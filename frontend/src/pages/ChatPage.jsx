@@ -21,6 +21,116 @@ const MAX_HISTORY = 12;
 const WELCOME =
   "Ask about matchup rankings, model-vs-market edges, player insights, or how the agents are grading out — I only answer from real computed data, and I can't generate or log a pick myself (that's the Picks tab).";
 
+// ---------------------------------------------------------------------
+// Minimal markdown rendering for assistant replies.
+//
+// The model's own formatting choice isn't deterministic — the exact same
+// underlying edge data has come back as a bulleted list in one reply and
+// a GFM-style pipe table in another (both correct, just styled
+// differently by the model). Without this, either style shows up as raw
+// "**"/"|" characters since the bubble below used to render plain text.
+// Hand-rolled on purpose rather than pulling in react-markdown or
+// similar — same "no new dependency that needs an npm install before it
+// can be tested" reasoning as lib/rate-limit.js and orchestrator.js's
+// own fetch-over-SDK choice; this only needs to cover the handful of
+// markdown constructs the model actually reaches for (bold, bullet/
+// numbered lists, simple tables), not the full spec.
+// ---------------------------------------------------------------------
+
+function renderInline(text, keyPrefix) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) =>
+    part.startsWith('**') && part.endsWith('**') && part.length > 4 ? (
+      <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>
+    ) : (
+      <span key={`${keyPrefix}-${i}`}>{part}</span>
+    )
+  );
+}
+
+function isTableSeparatorLine(line) {
+  return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function parseTableRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function renderMarkdownBlock(block, blockIndex) {
+  const lines = block.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return null;
+
+  // A header row followed by a "---|---" separator row = a pipe table.
+  if (lines.length >= 2 && lines[0].includes('|') && isTableSeparatorLine(lines[1])) {
+    const header = parseTableRow(lines[0]);
+    const rows = lines.slice(2).map(parseTableRow);
+    return (
+      <div key={blockIndex} className="overflow-x-auto">
+        <table className="text-sm border-collapse">
+          <thead>
+            <tr>
+              {header.map((cell, i) => (
+                <th key={i} className="border-b border-slate-300 px-2 py-1 text-left font-semibold">
+                  {renderInline(cell, `h${i}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci} className="border-b border-slate-100 px-2 py-1 align-top">
+                    {renderInline(cell, `r${ri}c${ci}`)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // Every line starts with "- "/"* " or "1. " → a list.
+  const bulletRe = /^\s*[-*]\s+(.*)$/;
+  const numberedRe = /^\s*\d+\.\s+(.*)$/;
+  if (lines.every((l) => bulletRe.test(l) || numberedRe.test(l))) {
+    const ordered = numberedRe.test(lines[0]);
+    const ListTag = ordered ? 'ol' : 'ul';
+    return (
+      <ListTag key={blockIndex} className={ordered ? 'list-decimal pl-5 space-y-0.5' : 'list-disc pl-5 space-y-0.5'}>
+        {lines.map((l, i) => {
+          const m = l.match(bulletRe) || l.match(numberedRe);
+          return <li key={i}>{renderInline(m[1], `li${i}`)}</li>;
+        })}
+      </ListTag>
+    );
+  }
+
+  // Otherwise a plain paragraph — preserve line breaks within the block.
+  return (
+    <p key={blockIndex}>
+      {lines.map((l, i) => (
+        <span key={i}>
+          {renderInline(l, `p${i}`)}
+          {i < lines.length - 1 && <br />}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+function renderMarkdown(content) {
+  const blocks = content.split(/\n\s*\n/);
+  return <div className="space-y-2">{blocks.map((b, i) => renderMarkdownBlock(b, i))}</div>;
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -79,11 +189,11 @@ export default function ChatPage() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[80%] whitespace-pre-wrap rounded-lg px-3 py-2 text-sm ${
-                m.role === 'user' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                m.role === 'user' ? 'whitespace-pre-wrap bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
               }`}
             >
-              {m.content}
+              {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
             </div>
           </div>
         ))}
