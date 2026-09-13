@@ -10,6 +10,7 @@ import PicksPage from './pages/PicksPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import RankingsPage from './pages/RankingsPage';
 import EdgePage from './pages/EdgePage';
+import PortfolioPage from './pages/PortfolioPage';
 import ChatPage from './pages/ChatPage';
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="leaderboard" element={<LeaderboardPage />} />
           <Route path="rankings" element={<RankingsPage />} />
           <Route path="edge" element={<EdgePage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="chat" element={<ChatPage />} />
         </Route>
       </Route>

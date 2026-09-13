@@ -137,6 +137,12 @@ async function buildSlate({ season, week, maxPicks = DEFAULT_MAX_PICKS, unitSize
       model_margin: edge.model_margin,
       model_favorite: edge.model_favorite,
       market_favorite: edge.market_favorite,
+      // Along for the ride purely for display (PortfolioPage.jsx renders
+      // "AWAY @ HOME" the same way EdgePage.jsx does) — not written to
+      // picks_log (the INSERT below only pulls the columns it needs), so
+      // this doesn't change the persisted row shape at all.
+      home_team_id: edge.home_team_id,
+      away_team_id: edge.away_team_id,
     });
   }
 
