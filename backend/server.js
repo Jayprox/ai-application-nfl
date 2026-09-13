@@ -15,6 +15,7 @@ const { authenticate } = require('./auth');
 
 const authRoutes = require('./routes/auth');
 const teamRoutes = require('./routes/teams');
+const gameRoutes = require('./routes/games');
 const playerRoutes = require('./routes/players');
 const queryRoutes = require('./routes/query');
 const insightsRoutes = require('./routes/insights');
@@ -76,6 +77,11 @@ app.use('/', authRoutes); // POST /login, /refresh, /logout
 // (agent/service) — see auth.js for how the two are distinguished.
 app.use(authenticate);
 app.use('/teams', teamRoutes);
+// Week's schedule/scoreboard (Part 2 Phase 3's Games/Slate page) — see
+// routes/games.js for why this is schedule/score/weather only, composed
+// with GET /odds and GET /edge on the frontend rather than duplicating
+// either here.
+app.use('/games', gameRoutes);
 app.use('/players', playerRoutes);
 app.use('/query', queryRoutes);
 // Part 2 Phase 1's deterministic insight layer (docs/part2-roadmap.md) —
