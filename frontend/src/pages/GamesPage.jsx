@@ -17,10 +17,14 @@ import GameCard from '../components/GameCard';
  * populated per-season by their own cron jobs, not backfilled, same
  * reasoning as that page's own header comment).
  *
- * Status is honestly only ever "Scheduled" or "Final" here — see
- * StatusBadge.jsx and the "refresh cadence" backlog item in
- * docs/part2-roadmap.md for why there's no live state yet. Not a bug,
- * matches this app's existing "don't fake a reading" convention.
+ * Status can be "Scheduled", "Live", or "Final" (StatusBadge.jsx) — the
+ * sync_live_scores job (worker/ingestion-worker.js, added 2026-09-14)
+ * writes 'in_progress' on games.status/home_score/away_score during a
+ * game's live window; see that job's own header comment for the
+ * Highlightly-quota cadence behind the ~10-minute refresh. Click a card
+ * (or a team name within it) to dig further in — the card itself links
+ * to GameDetailPage.jsx, GameCard.jsx's own header comment has the "why
+ * not just wrap it in a <Link>" note.
  */
 
 const CURRENT_SEASON = 2026;

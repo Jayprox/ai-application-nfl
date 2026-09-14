@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import GamesPage from './pages/GamesPage';
+import GameDetailPage from './pages/GameDetailPage';
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
 import TeamBrowsePage from './pages/TeamBrowsePage';
@@ -29,6 +30,7 @@ export default function App() {
         <Route element={<Layout />}>
           <Route index element={<Navigate to="/games" replace />} />
           <Route path="games" element={<GamesPage />} />
+          <Route path="games/:gameId" element={<GameDetailPage />} />
           <Route path="teams" element={<TeamBrowsePage />} />
           <Route path="teams/:teamId" element={<TeamDetailPage />} />
           <Route path="players" element={<PlayerBrowsePage />} />

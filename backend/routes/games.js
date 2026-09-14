@@ -3,6 +3,17 @@
  * =========================================================================
  * GET /games?season=&week=  — one week's full schedule: both teams, kickoff
  *                              time, stadium, weather, score, and status.
+ * GET /games/:gameId         — single game, same row shape as above — the
+ *                              per-game deep dive page's (GameDetailPage.jsx)
+ *                              primary fetch. Composes with the pre-existing
+ *                              GET /edge/games/:gameId and GET /odds/games/:id
+ *                              plus GET /games/:gameId/injuries below.
+ * GET /games/:gameId/injuries — both rosters' latest injury_reports row per
+ *                              player for this game's season/week, split
+ *                              into { home, away } — see that route's own
+ *                              comment for why a season/week-scoped query
+ *                              is possible here (injury_reports carries
+ *                              team_id/season/week directly).
  *
  * This is the "front door" data source for Part 2 Phase 3's Games/Slate
  * page (docs/part2-roadmap.md) — a sportsbook-scoreboard-style week view
@@ -72,6 +83,89 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[routes/games] list failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/:gameId — single game, same shape as one row of GET /games
+// (season+week list above) — GameDetailPage.jsx's primary fetch. Composes
+// with the already-existing GET /edge/games/:gameId (backend/routes/edge.js)
+// and GET /odds/games/:id (backend/routes/odds.js) plus the new
+// GET /games/:gameId/injuries route below, same "one source of truth,
+// link out rather than duplicate" principle as the rest of this file —
+// this route stays schedule/score/weather-only, exactly like the list
+// route above.
+router.get('/:gameId', async (req, res) => {
+  const { gameId } = req.params;
+  try {
+    const { rows } = await query(
+      `SELECT g.game_id, g.season, g.week, g.game_type, g.game_datetime, g.game_slot,
+              g.weather_condition, g.weather_temp_f, g.weather_wind_mph,
+              g.home_score, g.away_score, g.status,
+              ht.team_id AS home_team_id, ht.abbreviation AS home_team_abbr, ht.name AS home_team_name,
+              at.team_id AS away_team_id, at.abbreviation AS away_team_abbr, at.name AS away_team_name,
+              s.name AS stadium_name, s.city AS stadium_city, s.state AS stadium_state, s.roof AS stadium_roof
+       FROM games g
+       JOIN teams ht ON ht.team_id = g.home_team_id
+       JOIN teams at ON at.team_id = g.away_team_id
+       JOIN stadiums s ON s.stadium_id = g.stadium_id
+       WHERE g.game_id = $1`,
+      [gameId]
+    );
+    const game = rows[0];
+    if (!game) return res.status(404).json({ error: 'game not found' });
+
+    const freshness = await getFreshness('sync_schedule');
+    res.json({ data: game, meta: { freshness } });
+  } catch (err) {
+    if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
+    console.error('[routes/games] detail lookup failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/:gameId/injuries — both teams' latest injury_reports row per
+// player for this game's season/week, split into { home, away }.
+// injury_reports carries team_id/season/week directly (db/schema.sql),
+// so this can filter straight to the two rosters that actually played in
+// THIS game rather than needing a "most recent report ever" fallback —
+// same DISTINCT ON (player_id) ... ORDER BY report_date DESC "latest
+// report wins" pattern backend/routes/players.js already uses for a
+// single player, just widened here to both rosters at once. Mirrors
+// GET /edge/games/:gameId and GET /odds/games/:id in shape (game-scoped,
+// 404 on an unknown or malformed game id) so GameDetailPage.jsx composes
+// all three the same way.
+router.get('/:gameId/injuries', async (req, res) => {
+  const { gameId } = req.params;
+  try {
+    const { rows: gameRows } = await query(
+      `SELECT home_team_id, away_team_id, season, week FROM games WHERE game_id = $1`,
+      [gameId]
+    );
+    const game = gameRows[0];
+    if (!game) return res.status(404).json({ error: 'game not found' });
+
+    const { rows } = await query(
+      `SELECT DISTINCT ON (ir.player_id)
+              ir.player_id, ir.team_id, p.full_name, p.position,
+              ir.report_status, ir.practice_status, ir.primary_injury, ir.secondary_injury, ir.report_date
+       FROM injury_reports ir
+       JOIN players p ON p.player_id = ir.player_id
+       WHERE ir.team_id IN ($1, $2) AND ir.season = $3 AND ir.week = $4
+       ORDER BY ir.player_id, ir.report_date DESC`,
+      [game.home_team_id, game.away_team_id, game.season, game.week]
+    );
+
+    res.json({
+      data: {
+        home: rows.filter((r) => r.team_id === game.home_team_id),
+        away: rows.filter((r) => r.team_id === game.away_team_id),
+      },
+      meta: { count: rows.length },
+    });
+  } catch (err) {
+    if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
+    console.error('[routes/games] injuries lookup failed:', err);
     res.status(500).json({ error: 'internal error' });
   }
 });
