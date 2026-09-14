@@ -6,10 +6,11 @@ import GameCard from '../components/GameCard';
 /**
  * Games page — the scoreboard-style "front door" (Part 2 Phase 3,
  * docs/part2-roadmap.md) for a week's schedule, composed from GET /games
- * (schedule/score/weather, backend/routes/games.js) and GET /edge
- * (model-vs-market disagreement, backend/lib/edge.js) rather than either
- * endpoint duplicating the other's data. Slice 1b of that phase — Slice
- * 1a was the /games endpoint itself.
+ * (schedule/score/weather, backend/routes/games.js), GET /edge
+ * (model-vs-market disagreement, backend/lib/edge.js), and GET /odds
+ * (spread/total, backend/routes/odds.js) rather than any endpoint
+ * duplicating another's data. Slice 1b of that phase — Slice 1a was the
+ * /games endpoint itself; odds wiring followed once the dark theme shipped.
  *
  * Same season/week selector convention as EdgePage.jsx (required week,
  * two most recent seasons — both game_odds and matchup_scores are
@@ -45,18 +46,31 @@ export default function GamesPage() {
     return `/edge?${new URLSearchParams({ season: String(season), week }).toString()}`;
   }, [season, week]);
 
+  const oddsPath = useMemo(() => {
+    if (!week) return null;
+    return `/odds?${new URLSearchParams({ season: String(season), week }).toString()}`;
+  }, [season, week]);
+
   const { data, error, loading, refetch } = useApiFetch(gamesPath);
-  // Edge data is a nice-to-have overlay, not the primary fetch this page
-  // gates on — a slow/failed /edge call shouldn't block the schedule
-  // itself from rendering, so its own loading/error state isn't surfaced
-  // here (a game card just shows no disagreement badge until it loads).
+  // Edge and odds are nice-to-have overlays, not the primary fetch this
+  // page gates on — a slow/failed /edge or /odds call shouldn't block the
+  // schedule itself from rendering, so neither's own loading/error state
+  // is surfaced here (a game card just shows no disagreement/odds badge
+  // until it loads), same reasoning for both.
   const { data: edgeData } = useApiFetch(edgePath);
+  const { data: oddsData } = useApiFetch(oddsPath);
 
   const edgeByGameId = useMemo(() => {
     const map = new Map();
     for (const row of edgeData?.data ?? []) map.set(row.game_id, row);
     return map;
   }, [edgeData]);
+
+  const oddsByGameId = useMemo(() => {
+    const map = new Map();
+    for (const row of oddsData?.data ?? []) map.set(row.game_id, row);
+    return map;
+  }, [oddsData]);
 
   const games = data?.data ?? [];
 
@@ -97,7 +111,12 @@ export default function GamesPage() {
         <>
           <div className="space-y-2">
             {games.map((game) => (
-              <GameCard key={game.game_id} game={game} edge={edgeByGameId.get(game.game_id)} />
+              <GameCard
+                key={game.game_id}
+                game={game}
+                edge={edgeByGameId.get(game.game_id)}
+                odds={oddsByGameId.get(game.game_id)}
+              />
             ))}
           </div>
           {data?.meta && (

@@ -2,13 +2,15 @@ import { Link } from 'react-router-dom';
 import StatusBadge from './StatusBadge';
 import WeatherBadge from './WeatherBadge';
 import EdgeBadge from './EdgeBadge';
+import OddsBadge from './OddsBadge';
 
 /**
  * One game's card for the Games page (Part 2 Phase 3's scoreboard-style
  * week view, docs/part2-roadmap.md) — built from data this app already
  * computes rather than duplicating it: `game` comes straight from
- * GET /games (backend/routes/games.js), and `edge` is that same game's
- * row from GET /edge (backend/lib/edge.js) if one exists, matched by
+ * GET /games (backend/routes/games.js), `edge` is that same game's row
+ * from GET /edge (backend/lib/edge.js), and `odds` is that same game's
+ * entry from GET /odds (backend/routes/odds.js) — each matched by
  * game_id on GamesPage.jsx rather than this component re-fetching
  * anything itself. Team names link to the same TeamDetailPage the Teams
  * tab already uses — one route per team, not a second lighter view.
@@ -33,7 +35,7 @@ function formatKickoff(iso) {
   });
 }
 
-export default function GameCard({ game, edge }) {
+export default function GameCard({ game, edge, odds }) {
   const isFinal = game.status === 'final';
 
   return (
@@ -66,6 +68,7 @@ export default function GameCard({ game, edge }) {
       </div>
       <div className="mt-2 flex flex-wrap gap-1.5">
         <WeatherBadge condition={game.weather_condition} tempF={game.weather_temp_f} />
+        <OddsBadge odds={odds} homeAbbr={game.home_team_abbr} />
         {edge ? <EdgeBadge edge={edge.edge} /> : null}
       </div>
     </div>
