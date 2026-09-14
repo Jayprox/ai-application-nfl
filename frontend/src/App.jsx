@@ -27,7 +27,7 @@ export default function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
-          <Route index element={<Navigate to="/teams" replace />} />
+          <Route index element={<Navigate to="/games" replace />} />
           <Route path="games" element={<GamesPage />} />
           <Route path="teams" element={<TeamBrowsePage />} />
           <Route path="teams/:teamId" element={<TeamDetailPage />} />
