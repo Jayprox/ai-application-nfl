@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApiFetch } from '../hooks/useApiFetch';
+import { useCurrentWeek } from '../hooks/useCurrentWeek';
 import AsyncState from '../components/AsyncState';
 import EdgeBadge from '../components/EdgeBadge';
 
@@ -28,6 +29,10 @@ import EdgeBadge from '../components/EdgeBadge';
  * not for display) — GET /teams is fetched alongside to build the same
  * id -> abbreviation lookup PlayerBrowsePage already uses for its team
  * filter dropdown.
+ *
+ * Season/week seed from GET /games/current-week on load (useCurrentWeek,
+ * added 2026-09-14 alongside BoardPage.jsx) instead of a hardcoded
+ * "week 1" — same convention as GamesPage.jsx now uses.
  */
 
 const CURRENT_SEASON = 2026;
@@ -39,8 +44,13 @@ const selectClass =
 
 export default function EdgePage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
-  const [weekInput, setWeekInput] = useState('1');
+  const [weekInput, setWeekInput] = useState('');
   const [onlyDisagreements, setOnlyDisagreements] = useState(false);
+
+  useCurrentWeek((current) => {
+    setSeason(current.season);
+    setWeekInput(String(current.week));
+  });
 
   const week = weekInput.trim();
 

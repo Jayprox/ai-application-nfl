@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch, AuthError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useApiFetch } from '../hooks/useApiFetch';
+import { useCurrentWeek } from '../hooks/useCurrentWeek';
 
 /**
  * Portfolio page — frontend surface for the portfolio/bankroll agent
@@ -28,6 +29,10 @@ import { useApiFetch } from '../hooks/useApiFetch';
  * is. home_team_id/away_team_id ride along on each slate entry purely
  * for the "AWAY @ HOME" display (see lib/portfolio.js's own comment on
  * why that doesn't change what's written to picks_log).
+ *
+ * Season/week seed from GET /games/current-week on load (useCurrentWeek,
+ * added 2026-09-14 alongside BoardPage.jsx) instead of a hardcoded
+ * "week 1" — same convention as GamesPage.jsx/EdgePage.jsx now use.
  */
 
 const CURRENT_SEASON = 2026;
@@ -41,9 +46,14 @@ const numberInputClass =
 
 export default function PortfolioPage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
-  const [weekInput, setWeekInput] = useState('1');
+  const [weekInput, setWeekInput] = useState('');
   const [maxPicksInput, setMaxPicksInput] = useState('5');
   const [unitSizeInput, setUnitSizeInput] = useState('1');
+
+  useCurrentWeek((current) => {
+    setSeason(current.season);
+    setWeekInput(String(current.week));
+  });
 
   const [result, setResult] = useState(null);
   const [mode, setMode] = useState(null); // 'preview' | 'build' — which action produced `result`

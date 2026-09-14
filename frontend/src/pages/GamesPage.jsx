@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useApiFetch } from '../hooks/useApiFetch';
+import { useCurrentWeek } from '../hooks/useCurrentWeek';
 import AsyncState from '../components/AsyncState';
 import GameCard from '../components/GameCard';
 
@@ -16,6 +17,11 @@ import GameCard from '../components/GameCard';
  * two most recent seasons — both game_odds and matchup_scores are
  * populated per-season by their own cron jobs, not backfilled, same
  * reasoning as that page's own header comment).
+ *
+ * Season/week seed from GET /games/current-week on load (useCurrentWeek,
+ * added 2026-09-14 alongside BoardPage.jsx) instead of starting blank —
+ * the user can still change either, this just replaces the old "type a
+ * week before you see anything" empty start.
  *
  * Status can be "Scheduled", "Live", or "Final" (StatusBadge.jsx) — the
  * sync_live_scores job (worker/ingestion-worker.js, added 2026-09-14)
@@ -36,7 +42,12 @@ const selectClass =
 
 export default function GamesPage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
-  const [weekInput, setWeekInput] = useState('1');
+  const [weekInput, setWeekInput] = useState('');
+
+  useCurrentWeek((current) => {
+    setSeason(current.season);
+    setWeekInput(String(current.week));
+  });
 
   const week = weekInput.trim();
 

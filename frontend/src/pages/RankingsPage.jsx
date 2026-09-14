@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApiFetch } from '../hooks/useApiFetch';
+import { useCurrentWeek } from '../hooks/useCurrentWeek';
 import AsyncState from '../components/AsyncState';
 
 /**
@@ -15,12 +16,14 @@ import AsyncState from '../components/AsyncState';
  * stat_category maps to a position filter server-side (QB -> passing_yards,
  * RB/FB/HB -> rushing_yards, WR/TE -> receiving_yards, everyone else
  * non-special-teams -> tackles) — see lib/ranking.js's header for why.
- * season is required by the route; week is optional and left blank by
- * default (whole-season top N) rather than defaulted to "current week",
- * since there's no existing frontend helper for "current NFL week" to
- * reuse (worker/ingestion-worker.js's currentNflSeason() only resolves
- * the season) — that's the first thing to add if a real "this week's
- * board" view is wanted later.
+ * season is required by the route; week is optional (blank means
+ * whole-season top N). Used to default blank/hardcoded-season on load,
+ * documented here as waiting on a reusable "current NFL week" helper —
+ * that helper now exists (GET /games/current-week, backend/lib/
+ * current-week.js, added 2026-09-14 alongside BoardPage.jsx), so this
+ * page seeds season/week from it via useCurrentWeek instead. Clearing
+ * the week field still falls back to the original whole-season view —
+ * this only changes what the page opens showing, not what's available.
  *
  * SEASONS is deliberately just the two most recent years, not the same
  * 6-year AVAILABLE_SEASONS list PlayerDetailPage uses for real historical
@@ -92,6 +95,11 @@ export default function RankingsPage() {
   const [statCategory, setStatCategory] = useState('passing_yards');
   const [season, setSeason] = useState(CURRENT_SEASON);
   const [weekInput, setWeekInput] = useState('');
+
+  useCurrentWeek((current) => {
+    setSeason(current.season);
+    setWeekInput(String(current.week));
+  });
 
   const rankingsPath = useMemo(() => {
     const params = new URLSearchParams({ stat_category: statCategory, season: String(season) });

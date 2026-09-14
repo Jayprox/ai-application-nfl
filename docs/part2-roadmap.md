@@ -137,15 +137,34 @@ only the orchestrator has an LLM in the loop.
 
 ## Part 2, Phase 3 — Frontend redesign
 
-Not started. The condition this phase was waiting on — "only after the
-team above is producing something worth looking at" — is now met, so this
-is a live open question for whenever it's prioritized, not a hard
-blocker. A Slate/Board/Game-style UI (per-game deep dive with situational
-context, per-market ranked boards, a portfolio builder, a logged track
-record) is the right shape to aim for based on what's proven out in the
-MLB app. Current frontend (7 screens now, counting Rankings/Edge/Chat
-added since the original 5) keeps working as the stats-browsing surface
-in the meantime.
+**In progress.** The Slate/Board/Game shape this phase was aiming for
+(per-game deep dive, per-market ranked boards, a portfolio builder, a
+logged track record) turned out to already exist as separate working
+pages by the time "build the Board" was actually scoped — Rankings, Edge,
+Portfolio, Picks/Leaderboard were all live already. So this phase shipped
+in two pieces instead of one redesign:
+
+- **Game deep dive — done, 2026-09-14.** `GameDetailPage.jsx`
+  (`GET /games/:gameId`, `GET /games/:gameId/injuries`, composed with the
+  existing `/edge/games/:gameId` and `/odds/games/:id`) — a game card on
+  the Games page now links through to matchup/edge/odds/injuries for that
+  one game instead of stopping at the card's own summary.
+- **Board home page — done, 2026-09-14.** `BoardPage.jsx`, now the app's
+  index route (`/board`, replacing the old redirect to `/games`) — a
+  curated front door composed from the pages already listed above (top
+  edges, rankings leaders, the portfolio agent's live record, a preview
+  of this week's games) rather than a duplicate of any of them, per this
+  doc's own "one source of truth, link out rather than duplicate"
+  principle. Needed one real gap closed first: `GET /games/current-week`
+  (`backend/lib/current-week.js`), since nothing before this had a
+  reusable way to resolve "this week" without the user typing a
+  season/week — Games/Rankings/Edge/Portfolio still all require manual
+  entry, unchanged by this.
+
+Genuinely still open: Games/Rankings/Edge/Portfolio's own season/week
+inputs could now default off `GET /games/current-week` the same way Board
+does, instead of requiring manual entry or defaulting to a hardcoded
+"week 1" — not done here, scoped narrowly to the Board page itself.
 
 ---
 
