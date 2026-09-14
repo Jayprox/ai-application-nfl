@@ -186,17 +186,29 @@ actually shipped:
 - Watch `sync_live_stats` across more live games to confirm the
   Highlightly stat map holds up broadly (one game's box score is
   confirmed so far).
-- Confirm the Highlightly quota-cache fix (2026-09-13,
-  `findHighlightlyMatch`'s module-scope cache) holds up across a full
-  Sunday slate of concurrent live games. **Correction, 2026-09-14:** the
+- **Confirm the Highlightly quota-cache fix holds up across a full
+  Sunday slate — done, 2026-09-14, and it didn't hold up on the first
+  try.** `findHighlightlyMatch`'s module-scope cache (2026-09-13) and the
+  `isDue()` `'game-window'` real-interval fix (2026-09-14 correction: the
   original incident writeup below said `sync_live_stats` polled "every
-  20s" — that was never actually true. `isDue()`'s `'game-window'`
-  schedule type ignored the job's `pollSeconds`/`intervalMinutes`
-  entirely, so the real cadence was always the scheduler's own 60s tick.
-  Fixed alongside the live-scoring work below (see
-  `LIVE_STATS_INTERVAL_MINUTES`'s comment in
-  `worker/ingestion-worker.js`) — `sync_live_stats` now really does
-  throttle to a real interval, not just a documented one.
+  20s" — that was never actually true; `isDue()` ignored the job's
+  `pollSeconds`/`intervalMinutes` entirely, so the real cadence was
+  always the scheduler's own 60s tick) both landed, but real Sunday
+  2026-09-13 deploy logs (checked 2026-09-14) show `sync_live_stats`
+  still hit Highlightly 429s from ~19:45 UTC onward and never recovered
+  for the rest of that evening — every 15-minute cooldown expired
+  straight into another 429, because the day's 100-request quota was
+  simply gone by mid-afternoon. The circuit breaker worked as designed
+  (no runaway hammering), it just can't manufacture quota that isn't
+  there. Real fix: recognized that per-player box-score freshness during
+  a LIVE game isn't consumed by anything today (insights.js stays gated
+  to `status='final'`; nflverse's `sync_historical_stats` is the real
+  source of truth for final stats) and cut `LIVE_STATS_INTERVAL_MINUTES`
+  30 -> 120 — an actual ~4x reduction in real call volume (13 games x 2
+  ticks instead of 8 in the early window), freeing the shared budget for
+  `sync_live_scores` and `sync_injury_reports`, which both have real
+  consumers today. See that constant's comment in
+  `worker/ingestion-worker.js` for the full math.
 - **Refresh cadence lags same-day results — Phase A (scoreboard) done,
   2026-09-14.** Went with candidate 3 below (true live scoring off
   Highlightly), but scoped narrowly: a new `sync_live_scores` worker job
@@ -259,4 +271,20 @@ actually shipped:
        Not pursued.
     3. True live scoring off `sync_live_stats`'s already-live box
        scores — chosen, see above for the actual scope it shipped with.
+- **`sync_odds` numeric overflow — fixed, 2026-09-14.** CONFIRMED real
+  incident: a run during Sunday 2026-09-13's live window (~20:02 UTC)
+  failed with "numeric field overflow" and kept failing across all 5 of
+  `runJob()`'s retries, recording zero net rows that run. Root cause:
+  `game_odds.home_price`/`away_price`/`over_price`/`under_price` were
+  sized `NUMERIC(7,2)` against 003_game_odds.sql's original assumption
+  that these stay pre-game-sized; the-odds-api's odds endpoint doesn't
+  cleanly separate pre-match from in-play once a game has kicked off,
+  and an in-play moneyline on a decided game can spike well past that.
+  Two fixes, a matched pair: `009_widen_game_odds_prices.sql` widens the
+  four price columns to `NUMERIC(9,2)` (needs running once against the
+  live Railway Postgres, same as every other migration here), and
+  `syncOdds()`'s insert loop now wraps each row in its own try/catch —
+  one bad/unexpected value only costs that one row instead of aborting
+  every row queued after it in the batch, and instead of burning all 5
+  retries on the same doomed full-batch re-attempt.
 - Phase 3 (frontend redesign) — scope and timing not yet decided.

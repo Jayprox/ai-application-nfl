@@ -714,24 +714,46 @@ let highlightlyCooldownUntil = 0;
 //   (4h / 1min) ~= 3,100 calls in the early window alone, against a
 //   100-request/DAY quota shared with everything else this worker calls
 //   Highlightly for.
-// Two fixes, both applied here: (1) isDue()'s 'game-window' case now
-// actually honors intervalMinutes, like 'fixed' does. (2) sync_live_stats
-// gets a real interval instead of a fake one. Picked conservatively
-// rather than precisely — the existing 429 circuit breaker
-// (highlightlyOnCooldown/noteHighlightly429 above) is the real backstop
-// if a maximal Sunday still exceeds budget; these constants are what to
-// tune first if that happens, or if this account ever moves off the free
-// tier:
+// Two fixes, both applied here (2026-09-14): (1) isDue()'s 'game-window'
+// case now actually honors intervalMinutes, like 'fixed' does. (2)
+// sync_live_stats gets a real interval instead of a fake one. Picked
+// conservatively rather than precisely — the existing 429 circuit
+// breaker (highlightlyOnCooldown/noteHighlightly429 above) is the real
+// backstop if a maximal Sunday still exceeds budget; these constants are
+// what to tune first if that happens, or if this account ever moves off
+// the free tier:
 //   13 games x (240min / 30min interval) = 8 ticks/game x 13 ~= 104
 //   calls in just the early window — still tight against 100/day shared
 //   with sync_live_scores and sync_injury_reports (see
 //   docs/part2-roadmap.md for sync_injury_reports' own, separate,
 //   NOT-yet-addressed Sunday cost), but a ~30x cut from the old effective
-//   cadence, and per-player box-score freshness during a live game isn't
-//   consumed by anything today (insights.js stays gated to
-//   status='final' — see syncLiveScores() below for why that's
-//   deliberately untouched).
-const LIVE_STATS_INTERVAL_MINUTES = 30;
+//   cadence.
+//
+// CONFIRMED follow-up, same day: 30 minutes still wasn't conservative
+// enough. Real Sunday 2026-09-13 deploy logs show sync_live_stats
+// hitting Highlightly 429s from ~19:45 UTC onward and never recovering
+// for the rest of that evening — every 15-minute cooldown
+// (highlightlyOnCooldown/noteHighlightly429 above) expired straight into
+// another 429 and another cooldown, on and on past midnight, because the
+// day's 100-request quota was simply gone. The circuit breaker did its
+// job (no runaway hammering once on cooldown), but a quota dead for
+// hours is still dead for hours — the fix isn't a smarter interval, it's
+// this job's actual value today: per-player box-score freshness during a
+// LIVE game isn't consumed by anything yet (insights.js stays gated to
+// status='final' — nflverse's own sync_historical_stats, a 24h 'fixed'
+// job, is the real source of truth for final per-player stats; see JOBS
+// below). Nothing in the product reads a live box score. sync_live_scores
+// (game status/score — the one thing GameCard actually renders live) and
+// sync_injury_reports both have real consumers and both need their share
+// of the same 100/day budget more than this job's in-progress freshness
+// does. Interval quadrupled, 30 -> 120 minutes: 13 games x (240min /
+// 120min) = 2 ticks/game x 13 ~= 26 calls in the early window instead of
+// 104 — an actual cut in real call volume, not just a longer wait before
+// hitting the same wall. Revisit upward again (or switch to an
+// event-based "fetch once when a game flips to final" trigger instead of
+// interval polling) if/when a live box score feature actually needs
+// fresher data than this.
+const LIVE_STATS_INTERVAL_MINUTES = 120;
 
 // sync_live_scores (below) is cheap by comparison: ONE /matches list
 // call covers every live game at once (confirmed 2026-09-14 against a
@@ -1605,23 +1627,42 @@ async function syncOdds() {
     }
   }
 
+  // CONFIRMED real incident, 2026-09-13 ~20:02 UTC: one row's price hit
+  // NUMERIC(7,2)'s overflow ceiling (see 009_widen_game_odds_prices.sql --
+  // that migration widens the routine case away) and, because every row
+  // in the batch shared this one un-guarded loop, aborted every row
+  // queued after the bad one too -- then runJob()'s retry re-fetched and
+  // re-tried the ENTIRE vendor response from scratch up to 5 times, same
+  // failure each time, for zero net rows recorded that run. A try/catch
+  // per row means one bad/unexpected value only costs that one row, not
+  // the whole run -- the column widening handles the routine case, this
+  // is the backstop for whatever the vendor sends next that it doesn't
+  // anticipate.
+  let inserted = 0;
+  let skipped = 0;
   for (const r of rowsToInsert) {
-    await pool.query(
-      `INSERT INTO game_odds (
-         game_id, bookmaker, market, home_price, away_price, home_point, away_point,
-         over_price, under_price, total_point, bookmaker_last_update
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [
-        r.gameId, r.bookmaker, r.market,
-        n(r.homePrice), n(r.awayPrice), n(r.homePoint), n(r.awayPoint),
-        n(r.overPrice), n(r.underPrice), n(r.totalPoint),
-        r.bookmakerLastUpdate,
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO game_odds (
+           game_id, bookmaker, market, home_price, away_price, home_point, away_point,
+           over_price, under_price, total_point, bookmaker_last_update
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+        [
+          r.gameId, r.bookmaker, r.market,
+          n(r.homePrice), n(r.awayPrice), n(r.homePoint), n(r.awayPoint),
+          n(r.overPrice), n(r.underPrice), n(r.totalPoint),
+          r.bookmakerLastUpdate,
+        ]
+      );
+      inserted++;
+    } catch (err) {
+      skipped++;
+      console.warn(`[job:sync_odds] skipping one row (${r.gameId}/${r.bookmaker}/${r.market}): ${err.message}`);
+    }
   }
 
-  console.log(`[job:sync_odds] ${rowsToInsert.length} odds row(s) recorded across ${entries.length} game(s) from the vendor`);
-  return { recordsProcessed: rowsToInsert.length };
+  console.log(`[job:sync_odds] ${inserted} odds row(s) recorded across ${entries.length} game(s) from the vendor${skipped ? ` (${skipped} row(s) skipped)` : ''}`);
+  return { recordsProcessed: inserted };
 }
 
 // ---------------------------------------------------------------------
