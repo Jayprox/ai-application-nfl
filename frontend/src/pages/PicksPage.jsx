@@ -25,11 +25,11 @@ import AsyncState from '../components/AsyncState';
 const AGENT_NAME = 'portfolio_agent_v1';
 
 const STATUS_STYLE = {
-  pending: 'text-slate-600 bg-slate-100',
-  correct: 'text-emerald-700 bg-emerald-50',
-  incorrect: 'text-red-700 bg-red-50',
-  push: 'text-amber-700 bg-amber-50',
-  void: 'text-slate-500 bg-slate-100',
+  pending: 'text-ink-dim bg-surface-2',
+  correct: 'text-positive bg-positive/12',
+  incorrect: 'text-negative bg-negative/12',
+  push: 'text-caution bg-caution/12',
+  void: 'text-ink-dim bg-surface-2',
 };
 
 const STATUS_LABEL = {
@@ -42,7 +42,7 @@ const STATUS_LABEL = {
 
 function StatusBadge({ status }) {
   return (
-    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${STATUS_STYLE[status] ?? 'text-slate-600 bg-slate-100'}`}>
+    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${STATUS_STYLE[status] ?? 'text-ink-dim bg-surface-2'}`}>
       {STATUS_LABEL[status] ?? status}
     </span>
   );
@@ -50,9 +50,9 @@ function StatusBadge({ status }) {
 
 function StatTile({ label, value }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-center">
-      <div className="text-lg font-semibold text-slate-900">{value}</div>
-      <div className="text-xs text-slate-500">{label}</div>
+    <div className="rounded-md border border-line bg-surface px-3 py-2 text-center">
+      <div className="text-lg font-semibold text-ink">{value}</div>
+      <div className="text-xs text-ink-dim">{label}</div>
     </div>
   );
 }
@@ -62,10 +62,10 @@ function StatTile({ label, value }) {
 // which is correct (that pick isn't about a side at all).
 function MatchupLine({ pick }) {
   if (!pick.away_team_abbr || !pick.home_team_abbr) return null;
-  const awayClass = pick.predicted_team_abbr === pick.away_team_abbr ? 'font-semibold text-slate-700' : '';
-  const homeClass = pick.predicted_team_abbr === pick.home_team_abbr ? 'font-semibold text-slate-700' : '';
+  const awayClass = pick.predicted_team_abbr === pick.away_team_abbr ? 'font-semibold text-ink' : '';
+  const homeClass = pick.predicted_team_abbr === pick.home_team_abbr ? 'font-semibold text-ink' : '';
   return (
-    <div className="text-xs text-slate-400">
+    <div className="text-xs text-ink-faint">
       {pick.week ? `Week ${pick.week} · ` : ''}
       <span className={awayClass}>{pick.away_team_abbr}</span> @ <span className={homeClass}>{pick.home_team_abbr}</span>
     </div>
@@ -111,8 +111,8 @@ export default function PicksPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Picks</h1>
-      <p className="text-sm text-slate-500 mb-4">Portfolio agent — every pick it's logged, and how it's graded out.</p>
+      <h1 className="text-xl font-semibold text-ink mb-1">Picks</h1>
+      <p className="text-sm text-ink-dim mb-4">Portfolio agent — every pick it's logged, and how it's graded out.</p>
 
       {record && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-6">
@@ -126,17 +126,17 @@ export default function PicksPage() {
       )}
 
       {rows.length === 0 ? (
-        <p className="text-sm text-slate-500">No picks logged yet.</p>
+        <p className="text-sm text-ink-dim">No picks logged yet.</p>
       ) : (
         <ul className="space-y-2">
           {rows.map((pick) => (
-            <li key={pick.pick_id} className="rounded-md border border-slate-200 bg-white px-4 py-3">
+            <li key={pick.pick_id} className="rounded-md border border-line bg-surface px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <MatchupLine pick={pick} />
-                  <div className="mt-0.5 font-medium text-slate-900 text-sm">{pickSummary(pick)}</div>
-                  {pick.reasoning && <p className="mt-1 text-xs text-slate-500">{pick.reasoning}</p>}
-                  <p className="mt-1 text-xs text-slate-400">
+                  <div className="mt-0.5 font-medium text-ink text-sm">{pickSummary(pick)}</div>
+                  {pick.reasoning && <p className="mt-1 text-xs text-ink-dim">{pick.reasoning}</p>}
+                  <p className="mt-1 text-xs text-ink-faint">
                     Logged {new Date(pick.created_at).toLocaleString()}
                     {pick.graded_at ? ` · Graded ${new Date(pick.graded_at).toLocaleString()}` : ''}
                   </p>

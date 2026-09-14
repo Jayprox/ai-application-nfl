@@ -9,7 +9,7 @@ import { statusBadgeClass, statusLabel } from '../constants/playerStatus';
 // /players?name=&team=&position_group=.
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 
 export default function PlayerBrowsePage() {
   const [nameInput, setNameInput] = useState('');
@@ -45,7 +45,7 @@ export default function PlayerBrowsePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-4">Players</h1>
+      <h1 className="text-xl font-semibold text-ink mb-4">Players</h1>
 
       <div className="flex flex-wrap gap-2 mb-4">
         <input
@@ -53,7 +53,7 @@ export default function PlayerBrowsePage() {
           placeholder="Search by name…"
           value={nameInput}
           onChange={(e) => setNameInput(e.target.value)}
-          className="flex-1 min-w-[180px] rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="flex-1 min-w-[180px] rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
         <select value={team} onChange={(e) => setTeam(e.target.value)} className={selectClass}>
           <option value="">All teams</option>
@@ -80,7 +80,7 @@ export default function PlayerBrowsePage() {
       {loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading players…" onRetry={refetch} />
       ) : players.length === 0 ? (
-        <p className="text-sm text-slate-500">No players match this search.</p>
+        <p className="text-sm text-ink-dim">No players match this search.</p>
       ) : (
         <>
           <ul className="grid gap-1.5 sm:grid-cols-2">
@@ -88,11 +88,11 @@ export default function PlayerBrowsePage() {
               <li key={player.player_id}>
                 <Link
                   to={`/players/${player.player_id}`}
-                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm hover:border-slate-400 hover:shadow-sm transition-all"
+                  className="flex items-center justify-between rounded-md border border-line bg-surface px-3 py-2 text-sm hover:border-accent/60 hover:shadow-sm transition-all"
                 >
-                  <span className="text-slate-900">{player.full_name}</span>
+                  <span className="text-ink">{player.full_name}</span>
                   <span className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">
+                    <span className="text-xs text-ink-faint">
                       {player.position}
                       {player.team_abbreviation ? ` · ${player.team_abbreviation}` : ''}
                     </span>
@@ -111,7 +111,7 @@ export default function PlayerBrowsePage() {
             ))}
           </ul>
           {atLimit && (
-            <p className="mt-3 text-xs text-slate-400">
+            <p className="mt-3 text-xs text-ink-faint">
               Showing the first {data.meta.limit} results — narrow your search to see more specific matches.
             </p>
           )}

@@ -35,9 +35,9 @@ const LAST_SEASON = 2025;
 const SEASONS = [CURRENT_SEASON, LAST_SEASON];
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 const numberInputClass =
-  'w-28 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'w-28 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent';
 
 export default function PortfolioPage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
@@ -88,8 +88,8 @@ export default function PortfolioPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Portfolio</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Portfolio</h1>
+      <p className="text-sm text-ink-dim mb-4">
         Builds a slate of game-line picks from the edge agent's strongest disagreements, sized flat by unit — a
         distinct concern from "which picks are good" (that's Edge). Preview costs nothing and logs nothing; Build
         &amp; log actually writes the picks (visible on the Picks tab, graded like any other agent's picks).
@@ -110,7 +110,7 @@ export default function PortfolioPage() {
           placeholder="Week"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
-          className="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="w-24 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
         <input
           type="number"
@@ -137,7 +137,7 @@ export default function PortfolioPage() {
           type="button"
           onClick={() => run(true)}
           disabled={!week || loading}
-          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          className="rounded-md border border-line bg-surface px-4 py-2 text-sm font-medium text-ink hover:bg-canvas disabled:opacity-40"
         >
           Preview slate
         </button>
@@ -145,19 +145,19 @@ export default function PortfolioPage() {
           type="button"
           onClick={() => run(false)}
           disabled={!week || loading}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-40"
         >
           Build &amp; log slate
         </button>
       </div>
 
-      {!week && <p className="text-sm text-slate-500">Enter a week to build a slate for it.</p>}
-      {loading && <p className="text-sm text-slate-400">{mode === 'build' ? 'Building…' : 'Previewing…'}</p>}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {!week && <p className="text-sm text-ink-dim">Enter a week to build a slate for it.</p>}
+      {loading && <p className="text-sm text-ink-faint">{mode === 'build' ? 'Building…' : 'Previewing…'}</p>}
+      {error && <p className="text-sm text-negative">{error}</p>}
 
       {result && !loading && (
         <>
-          <p className="text-sm text-slate-600 mb-3">
+          <p className="text-sm text-ink-dim mb-3">
             {mode === 'build' ? 'Logged' : 'Would log'} {result.picked} pick{result.picked === 1 ? '' : 's'} from{' '}
             {result.considered} disagreement{result.considered === 1 ? '' : 's'} considered, at {result.unit_size}{' '}
             unit{Number(result.unit_size) === 1 ? '' : 's'} each.
@@ -165,7 +165,7 @@ export default function PortfolioPage() {
           </p>
 
           {result.slate.length === 0 ? (
-            <p className="text-sm text-slate-500">No picks — no disagreements met the bar for this week.</p>
+            <p className="text-sm text-ink-dim">No picks — no disagreements met the bar for this week.</p>
           ) : (
             <ul className="space-y-2">
               {result.slate.map((pick) => {
@@ -178,19 +178,19 @@ export default function PortfolioPage() {
                       ? awayAbbr
                       : null;
                 return (
-                  <li key={pick.pick_id ?? pick.game_id} className="rounded-md border border-slate-200 bg-white px-4 py-3">
+                  <li key={pick.pick_id ?? pick.game_id} className="rounded-md border border-line bg-surface px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <div className="font-medium text-slate-900 text-sm">
+                        <div className="font-medium text-ink text-sm">
                           {awayAbbr} @ {homeAbbr}
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Pick: <span className="font-medium text-slate-700">{pickedAbbr ?? '—'}</span> ·{' '}
+                        <div className="mt-1 text-xs text-ink-dim">
+                          Pick: <span className="font-medium text-ink">{pickedAbbr ?? '—'}</span> ·{' '}
                           {pick.units} unit{Number(pick.units) === 1 ? '' : 's'} · {pick.market}
                         </div>
-                        {pick.reasoning && <p className="mt-1 text-xs text-slate-400">{pick.reasoning}</p>}
+                        {pick.reasoning && <p className="mt-1 text-xs text-ink-faint">{pick.reasoning}</p>}
                       </div>
-                      <span className="whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-amber-700 bg-amber-50">
+                      <span className="whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-accent bg-accent/12">
                         {pick.model_margin !== null && pick.model_margin !== undefined
                           ? `by ${Number(pick.model_margin).toFixed(1)}`
                           : 'no margin'}
@@ -204,12 +204,12 @@ export default function PortfolioPage() {
 
           {result.skipped?.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs font-medium text-slate-500 mb-1">
+              <p className="text-xs font-medium text-ink-dim mb-1">
                 Skipped ({result.skipped.length})
               </p>
               <ul className="space-y-1">
                 {result.skipped.map((s, i) => (
-                  <li key={i} className="text-xs text-slate-400">
+                  <li key={i} className="text-xs text-ink-faint">
                     {s.game_id}: {s.reason}
                   </li>
                 ))}

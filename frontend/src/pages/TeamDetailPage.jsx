@@ -17,7 +17,7 @@ export default function TeamDetailPage() {
 
   const team = data?.data;
   if (!team) {
-    return <p className="text-sm text-slate-500">Team not found.</p>;
+    return <p className="text-sm text-ink-dim">Team not found.</p>;
   }
 
   const rosterByGroup = (team.roster ?? []).reduce((acc, player) => {
@@ -27,30 +27,30 @@ export default function TeamDetailPage() {
 
   return (
     <div>
-      <Link to="/teams" className="text-sm text-slate-500 hover:text-slate-900">
+      <Link to="/teams" className="text-sm text-ink-dim hover:text-ink">
         &larr; Back to Teams
       </Link>
 
       <div className="mt-2 mb-6 flex items-baseline justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">{team.name}</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-xl font-semibold text-ink">{team.name}</h1>
+          <p className="text-sm text-ink-dim">
             {team.conference} {team.division} &middot; {team.stadium_name}, {team.city}, {team.state}
             {team.roof && team.roof !== 'outdoors' ? ` (${team.roof})` : ''}
             {team.surface ? ` · ${team.surface}` : ''}
           </p>
         </div>
-        <span className="text-2xl font-bold text-slate-300">{team.abbreviation}</span>
+        <span className="text-2xl font-bold text-ink-faint">{team.abbreviation}</span>
       </div>
 
       {Object.keys(rosterByGroup).length === 0 ? (
-        <p className="text-sm text-slate-500">No roster on file for this team.</p>
+        <p className="text-sm text-ink-dim">No roster on file for this team.</p>
       ) : (
         <div className="space-y-6">
           {POSITION_GROUP_ORDER.map((group) =>
             rosterByGroup[group] ? (
               <div key={group}>
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-2">
                   {POSITION_GROUP_LABEL[group]} ({rosterByGroup[group].length})
                 </h2>
                 <ul className="grid gap-1 sm:grid-cols-2">
@@ -58,11 +58,11 @@ export default function TeamDetailPage() {
                     <li key={player.player_id}>
                       <Link
                         to={`/players/${player.player_id}`}
-                        className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm hover:border-slate-400 transition-colors"
+                        className="flex items-center justify-between rounded-md border border-line bg-surface px-3 py-1.5 text-sm hover:border-accent/60 transition-colors"
                       >
-                        <span className="text-slate-900">{player.full_name}</span>
+                        <span className="text-ink">{player.full_name}</span>
                         <span className="flex items-center gap-2">
-                          <span className="text-xs text-slate-400">{player.position}</span>
+                          <span className="text-xs text-ink-faint">{player.position}</span>
                           {player.status !== 'active' && (
                             <span
                               className={`text-xs font-medium rounded px-1.5 py-0.5 ${statusBadgeClass(

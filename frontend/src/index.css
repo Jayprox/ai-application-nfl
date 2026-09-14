@@ -1,5 +1,38 @@
 @import "tailwindcss";
 
+/*
+ * Stadium Lights — the app's dark theme (brainstormed and approved
+ * 2026-09-14, see the "Chalk Dark Mode" comparison artifact). Same dark
+ * structure as the MLB sister app's palette, but with its own football
+ * accent (orange/blue) instead of MLB's purple/blue, so the two apps
+ * feel like the same family without sharing one inherited palette.
+ *
+ * Every color in the app should come from one of these tokens rather
+ * than a raw Tailwind gray/red/amber/etc. shade — same "one shared
+ * source" rule the app already follows for components (EdgeBadge,
+ * StatusBadge, WeatherBadge). Tailwind v4's @theme turns each of these
+ * into real utilities: bg-canvas, text-ink, border-line, bg-accent/12,
+ * etc.
+ */
+@theme {
+  --color-canvas: #0b0f14;     /* page background */
+  --color-surface: #121820;    /* card/header/table/panel background */
+  --color-surface-2: #1a222c;  /* hover fill, neutral chip background */
+  --color-line: #2a3540;       /* borders, dividers, form-control borders */
+
+  --color-ink: #f5f7fa;        /* primary text */
+  --color-ink-dim: #9aa7b4;    /* secondary text, descriptions */
+  --color-ink-faint: #62717d;  /* muted/meta text, table header labels */
+
+  --color-link: #4d9fec;       /* inline navigational links (stadium-light blue) */
+  --color-accent: #f4762b;     /* primary CTA / active state / "disagreement" (end-zone orange) */
+  --color-on-accent: #0b0f14;  /* text sitting on the accent color */
+
+  --color-caution: #e8b64a;    /* mild warning, distinct from accent — ties/pushes, questionable */
+  --color-positive: #34d399;   /* success / agree / favorable */
+  --color-negative: #f2545b;   /* error / disagree-negative / out */
+}
+
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-canvas text-ink antialiased;
 }

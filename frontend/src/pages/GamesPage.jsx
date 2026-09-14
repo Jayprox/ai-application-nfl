@@ -27,7 +27,7 @@ const LAST_SEASON = 2025;
 const SEASONS = [CURRENT_SEASON, LAST_SEASON];
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 
 export default function GamesPage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
@@ -62,8 +62,8 @@ export default function GamesPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Games</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Games</h1>
+      <p className="text-sm text-ink-dim mb-4">
         This week's schedule at a glance — score and status when known, plus a flag when the edge agent's
         model-vs-market read disagrees. Click a team to dig into the research behind it.
       </p>
@@ -83,16 +83,16 @@ export default function GamesPage() {
           placeholder="Week"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
-          className="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="w-24 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 
       {!week ? (
-        <p className="text-sm text-slate-500">Enter a week to see that week's games.</p>
+        <p className="text-sm text-ink-dim">Enter a week to see that week's games.</p>
       ) : loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading games…" onRetry={refetch} />
       ) : games.length === 0 ? (
-        <p className="text-sm text-slate-500">No games found for season {season}, week {week}.</p>
+        <p className="text-sm text-ink-dim">No games found for season {season}, week {week}.</p>
       ) : (
         <>
           <div className="space-y-2">
@@ -101,7 +101,7 @@ export default function GamesPage() {
             ))}
           </div>
           {data?.meta && (
-            <p className="mt-3 text-xs text-slate-400">
+            <p className="mt-3 text-xs text-ink-faint">
               {data.meta.count} game{data.meta.count === 1 ? '' : 's'}
             </p>
           )}

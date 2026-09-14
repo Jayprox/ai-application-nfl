@@ -19,19 +19,24 @@ const REPORT_STATUS_LABEL = {
   probable: 'Probable',
 };
 
+// A mild-to-severe ladder, not five arbitrary colors: caution (mildest)
+// -> accent (more severe, reuses the app's own orange rather than adding
+// a second orange-ish hue) -> negative, with injured_reserve getting a
+// bordered variant of the same negative color rather than a fourth red
+// shade, since it's the same "out" severity just for longer.
 const REPORT_STATUS_STYLE = {
-  questionable: 'text-amber-700 bg-amber-50',
-  doubtful: 'text-orange-700 bg-orange-50',
-  out: 'text-red-700 bg-red-50',
-  injured_reserve: 'text-red-800 bg-red-100',
-  probable: 'text-emerald-700 bg-emerald-50',
+  questionable: 'text-caution bg-caution/12',
+  doubtful: 'text-accent bg-accent/12',
+  out: 'text-negative bg-negative/12',
+  injured_reserve: 'text-negative bg-negative/20 border border-negative/40',
+  probable: 'text-positive bg-positive/12',
 };
 
 export default function InjuryBadge({ injury }) {
   if (!injury || !injury.report_status || injury.report_status === 'active') return null;
 
   const label = REPORT_STATUS_LABEL[injury.report_status] ?? injury.report_status;
-  const style = REPORT_STATUS_STYLE[injury.report_status] ?? 'text-slate-600 bg-slate-100';
+  const style = REPORT_STATUS_STYLE[injury.report_status] ?? 'text-ink-dim bg-surface-2';
   const detail = [injury.primary_injury, injury.secondary_injury].filter(Boolean).join(', ');
 
   return (

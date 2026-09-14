@@ -19,14 +19,14 @@ const STATUS_LABEL = {
 };
 
 const STATUS_STYLE = {
-  scheduled: 'text-slate-500 bg-slate-100',
-  final: 'text-slate-700 bg-slate-200',
-  postponed: 'text-amber-700 bg-amber-50',
+  scheduled: 'text-ink-dim bg-surface-2',
+  final: 'text-ink bg-surface-2',
+  postponed: 'text-caution bg-caution/12',
 };
 
 export default function StatusBadge({ status }) {
   const label = STATUS_LABEL[status] ?? status;
-  const style = STATUS_STYLE[status] ?? 'text-slate-500 bg-slate-100';
+  const style = STATUS_STYLE[status] ?? 'text-ink-dim bg-surface-2';
   return (
     <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${style}`}>
       {label}

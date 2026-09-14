@@ -9,9 +9,9 @@
  */
 
 const EDGE_BADGE = {
-  true: { label: 'Disagreement', className: 'text-amber-700 bg-amber-50' },
-  false: { label: 'Agrees', className: 'text-emerald-700 bg-emerald-50' },
-  null: { label: 'No signal', className: 'text-slate-500 bg-slate-100' },
+  true: { label: 'Disagreement', className: 'text-accent bg-accent/12' },
+  false: { label: 'Agrees', className: 'text-positive bg-positive/12' },
+  null: { label: 'No signal', className: 'text-ink-dim bg-surface-2' },
 };
 
 export default function EdgeBadge({ edge }) {

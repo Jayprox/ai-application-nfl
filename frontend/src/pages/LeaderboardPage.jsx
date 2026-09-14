@@ -26,18 +26,18 @@ export default function LeaderboardPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Leaderboard</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Leaderboard</h1>
+      <p className="text-sm text-ink-dim mb-4">
         Every agent logging picks, ranked by hit rate. More rows appear as more agents start picking.
       </p>
 
       {agents.length === 0 ? (
-        <p className="text-sm text-slate-500">No picks logged by any agent yet.</p>
+        <p className="text-sm text-ink-dim">No picks logged by any agent yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <div className="overflow-x-auto rounded-md border border-line bg-surface">
           <table className="w-full min-w-max text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                 <th className="py-2 pl-4 pr-4">#</th>
                 <th className="py-2 pr-4">Agent</th>
                 <th className="py-2 pr-4">Record</th>
@@ -48,15 +48,15 @@ export default function LeaderboardPage() {
             </thead>
             <tbody>
               {agents.map((agent) => (
-                <tr key={agent.agent_name} className="border-b border-slate-100 last:border-0">
-                  <td className="py-3 pl-4 pr-4 font-semibold text-slate-400">{agent.rank}</td>
-                  <td className="py-3 pr-4 font-medium text-slate-900">{agent.agent_name}</td>
-                  <td className="py-3 pr-4 text-slate-900">{formatRecord(agent)}</td>
-                  <td className="py-3 pr-4 text-slate-900">
+                <tr key={agent.agent_name} className="border-b border-line last:border-0">
+                  <td className="py-3 pl-4 pr-4 font-semibold text-ink-faint">{agent.rank}</td>
+                  <td className="py-3 pr-4 font-medium text-ink">{agent.agent_name}</td>
+                  <td className="py-3 pr-4 text-ink">{formatRecord(agent)}</td>
+                  <td className="py-3 pr-4 text-ink">
                     {agent.hit_rate_pct !== null ? `${agent.hit_rate_pct}%` : '—'}
                   </td>
-                  <td className="py-3 pr-4 text-slate-500">{agent.pending}</td>
-                  <td className="py-3 pr-4 text-slate-500">{agent.total}</td>
+                  <td className="py-3 pr-4 text-ink-dim">{agent.pending}</td>
+                  <td className="py-3 pr-4 text-ink-dim">{agent.total}</td>
                 </tr>
               ))}
             </tbody>

@@ -13,7 +13,7 @@ export default function WeatherBadge({ condition, tempF }) {
   const label = condition === 'dome' ? 'Dome' : tempF != null ? `${Math.round(Number(tempF))}°F` : null;
   if (!label) return null;
   return (
-    <span className="whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-slate-500 bg-slate-100">
+    <span className="whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-ink-dim bg-surface-2">
       {label}
     </span>
   );

@@ -60,7 +60,7 @@ const STAT_CATEGORY_UNIT = {
 };
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 
 // Same "how stale is this cached table" formatting PlayerDetailPage uses
 // for /query's freshness.synced_at — matchup_scores is on the same
@@ -83,9 +83,9 @@ function formatSyncedAt(iso) {
 // score look equally authoritative.
 function signalBadgeClass(categoriesUsed) {
   const base = 'inline-block rounded-full px-2 py-0.5 text-xs font-medium';
-  if (categoriesUsed >= 3) return `${base} bg-emerald-50 text-emerald-700`;
-  if (categoriesUsed === 2) return `${base} bg-amber-50 text-amber-700`;
-  return `${base} bg-rose-50 text-rose-700`;
+  if (categoriesUsed >= 3) return `${base} bg-positive/12 text-positive`;
+  if (categoriesUsed === 2) return `${base} bg-caution/12 text-caution`;
+  return `${base} bg-negative/12 text-negative`;
 }
 
 export default function RankingsPage() {
@@ -105,8 +105,8 @@ export default function RankingsPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Rankings</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Rankings</h1>
+      <p className="text-sm text-ink-dim mb-4">
         Top matchup scores for one stat category — the ranking agent's read on which players have the most
         favorable spot this week, purely from matchup/form/situational/role-trend signal, no market data involved.
         This is a trend score, not a production ranking: a player can score high off one strongly favorable
@@ -136,23 +136,23 @@ export default function RankingsPage() {
           placeholder="All weeks"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
-          className="w-28 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="w-28 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
       </div>
 
       {loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading rankings…" onRetry={refetch} />
       ) : rankings.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-ink-dim">
           No matchup scores yet for {STAT_CATEGORY_LABEL[statCategory].toLowerCase()} in {season}
           {weekInput ? `, week ${weekInput}` : ''}.
         </p>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+          <div className="overflow-x-auto rounded-md border border-line bg-surface">
             <table className="w-full min-w-max text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
                   <th className="py-2 pl-4 pr-4">#</th>
                   <th className="py-2 pr-4">Player</th>
                   <th className="py-2 pr-4">Pos</th>
@@ -163,15 +163,15 @@ export default function RankingsPage() {
               </thead>
               <tbody>
                 {rankings.map((row) => (
-                  <tr key={`${row.player_id}-${row.game_id}`} className="border-b border-slate-100 last:border-0">
-                    <td className="py-3 pl-4 pr-4 font-semibold text-slate-400">{row.rank}</td>
+                  <tr key={`${row.player_id}-${row.game_id}`} className="border-b border-line last:border-0">
+                    <td className="py-3 pl-4 pr-4 font-semibold text-ink-faint">{row.rank}</td>
                     <td className="py-3 pr-4">
-                      <Link to={`/players/${row.player_id}`} className="font-medium text-slate-900 hover:underline">
+                      <Link to={`/players/${row.player_id}`} className="font-medium text-ink hover:underline">
                         {row.player_name}
                       </Link>
                     </td>
-                    <td className="py-3 pr-4 text-slate-500">{row.position}</td>
-                    <td className="py-3 pr-4 font-medium text-slate-900">{Number(row.score).toFixed(1)}</td>
+                    <td className="py-3 pr-4 text-ink-dim">{row.position}</td>
+                    <td className="py-3 pr-4 font-medium text-ink">{Number(row.score).toFixed(1)}</td>
                     <td className="py-3 pr-4">
                       <span
                         className={signalBadgeClass(row.categories_used)}
@@ -180,7 +180,7 @@ export default function RankingsPage() {
                         {row.categories_used}/4
                       </span>
                     </td>
-                    <td className="py-3 pr-4 text-slate-500">
+                    <td className="py-3 pr-4 text-ink-dim">
                       {row.season_avg != null
                         ? `${Number(row.season_avg).toFixed(1)} ${STAT_CATEGORY_UNIT[statCategory]}${row.games_played != null ? ` (${row.games_played} gm)` : ''}`
                         : '—'}
@@ -191,7 +191,7 @@ export default function RankingsPage() {
             </table>
           </div>
           {data?.meta && (
-            <p className="mt-3 text-xs text-slate-400">
+            <p className="mt-3 text-xs text-ink-faint">
               {data.meta.count} player{data.meta.count === 1 ? '' : 's'} &middot;{' '}
               {formatSyncedAt(data.meta.freshness?.synced_at)}
             </p>

@@ -75,7 +75,7 @@ function renderMarkdownBlock(block, blockIndex) {
           <thead>
             <tr>
               {header.map((cell, i) => (
-                <th key={i} className="border-b border-slate-300 px-2 py-1 text-left font-semibold">
+                <th key={i} className="border-b border-line px-2 py-1 text-left font-semibold">
                   {renderInline(cell, `h${i}`)}
                 </th>
               ))}
@@ -85,7 +85,7 @@ function renderMarkdownBlock(block, blockIndex) {
             {rows.map((row, ri) => (
               <tr key={ri}>
                 {row.map((cell, ci) => (
-                  <td key={ci} className="border-b border-slate-100 px-2 py-1 align-top">
+                  <td key={ci} className="border-b border-line px-2 py-1 align-top">
                     {renderInline(cell, `r${ri}c${ci}`)}
                   </td>
                 ))}
@@ -178,30 +178,30 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Chat</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Chat</h1>
+      <p className="text-sm text-ink-dim mb-4">
         The research assistant — calls the same rankings, edge, insights, picks, and leaderboard data as the other
         tabs, answers only from what those return.
       </p>
 
-      <div className="flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white p-4 space-y-3">
-        {messages.length === 0 && <p className="text-sm text-slate-400">{WELCOME}</p>}
+      <div className="flex-1 overflow-y-auto rounded-md border border-line bg-surface p-4 space-y-3">
+        {messages.length === 0 && <p className="text-sm text-ink-faint">{WELCOME}</p>}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-                m.role === 'user' ? 'whitespace-pre-wrap bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+                m.role === 'user' ? 'whitespace-pre-wrap bg-accent text-on-accent' : 'bg-surface-2 text-ink'
               }`}
             >
               {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
             </div>
           </div>
         ))}
-        {sending && <p className="text-sm text-slate-400">Thinking…</p>}
+        {sending && <p className="text-sm text-ink-faint">Thinking…</p>}
         <div ref={bottomRef} />
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm text-negative">{error}</p>}
 
       <div className="mt-3 flex gap-2">
         <textarea
@@ -210,13 +210,13 @@ export default function ChatPage() {
           onKeyDown={handleKeyDown}
           placeholder="e.g. Who are the top rushing matchups this week?"
           rows={1}
-          className="flex-1 resize-none rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
         <button
           type="button"
           onClick={send}
           disabled={sending || !input.trim()}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-on-accent disabled:opacity-40"
         >
           Send
         </button>

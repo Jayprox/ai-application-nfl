@@ -18,7 +18,7 @@ import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 // from this page's own season/scope selectors.
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 
 const SCOPES = [
   { value: 'season', label: 'Season Avg' },
@@ -98,7 +98,7 @@ export default function PlayerDetailPage() {
       <AsyncState loading={playerLoading} error={playerError} loadingLabel="Loading player…" onRetry={refetchPlayer} />
     );
   }
-  if (!player) return <p className="text-sm text-slate-500">Player not found.</p>;
+  if (!player) return <p className="text-sm text-ink-dim">Player not found.</p>;
 
   const columns = STAT_COLUMNS_BY_POSITION_GROUP[player.position_group] ?? [];
 
@@ -107,7 +107,7 @@ export default function PlayerDetailPage() {
       <div className="flex items-start justify-between gap-4">
         <Link
           to={player.team_id ? `/teams/${player.team_id}` : '/players'}
-          className="text-sm text-slate-500 hover:text-slate-900"
+          className="text-sm text-ink-dim hover:text-ink"
         >
           &larr; Back to {player.team_id ? player.team_name : 'Players'}
         </Link>
@@ -115,8 +115,8 @@ export default function PlayerDetailPage() {
       </div>
 
       <div className="mt-2 mb-6">
-        <h1 className="text-xl font-semibold text-slate-900">{player.full_name}</h1>
-        <p className="text-sm text-slate-500">
+        <h1 className="text-xl font-semibold text-ink">{player.full_name}</h1>
+        <p className="text-sm text-ink-dim">
           {player.position} {player.team_name ? `· ${player.team_name}` : '· Free agent'}
         </p>
       </div>
@@ -124,14 +124,14 @@ export default function PlayerDetailPage() {
       <PlayerInsights playerId={playerId} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="flex rounded-md border border-slate-200 bg-white p-0.5">
+        <div className="flex rounded-md border border-line bg-surface p-0.5">
           {SCOPES.map((s) => (
             <button
               key={s.value}
               type="button"
               onClick={() => setScope(s.value)}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                scope === s.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+                scope === s.value ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
               }`}
             >
               {s.label}
@@ -143,7 +143,7 @@ export default function PlayerDetailPage() {
           <select
             value={season}
             onChange={(e) => setSeason(Number(e.target.value))}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+            className="rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
           >
             {AVAILABLE_SEASONS.map((yr) => (
               <option key={yr} value={yr}>
@@ -184,7 +184,7 @@ export default function PlayerDetailPage() {
           <button
             type="button"
             onClick={clearSplits}
-            className="text-sm text-slate-500 underline hover:text-slate-900"
+            className="text-sm text-ink-dim underline hover:text-ink"
           >
             Clear
           </button>
@@ -207,7 +207,7 @@ export default function PlayerDetailPage() {
       )}
 
       {statsData?.meta && (
-        <p className="mt-4 text-xs text-slate-400">
+        <p className="mt-4 text-xs text-ink-faint">
           {statsData.meta.sample_size} game{statsData.meta.sample_size === 1 ? '' : 's'} &middot;{' '}
           {formatSyncedAt(statsData.meta.freshness?.synced_at)}
         </p>
@@ -218,13 +218,13 @@ export default function PlayerDetailPage() {
 
 function StatGrid({ stats, columns }) {
   return (
-    <dl className="grid gap-px overflow-hidden rounded-md border border-slate-200 bg-slate-200 sm:grid-cols-2">
+    <dl className="grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-2">
       {columns.map(({ key, label }) => {
         const value = stats?.[key];
         return (
-          <div key={key} className="flex items-baseline justify-between bg-white px-4 py-3">
-            <dt className="text-sm text-slate-600">{label}</dt>
-            <dd className="text-sm font-semibold text-slate-900">
+          <div key={key} className="flex items-baseline justify-between bg-surface px-4 py-3">
+            <dt className="text-sm text-ink-dim">{label}</dt>
+            <dd className="text-sm font-semibold text-ink">
               {value === null || value === undefined
                 ? '—'
                 : Number.isInteger(Number(value))
@@ -240,10 +240,10 @@ function StatGrid({ stats, columns }) {
 
 function GameLogTable({ rows, columns }) {
   return (
-    <div className="overflow-x-auto rounded-md border border-slate-200">
+    <div className="overflow-x-auto rounded-md border border-line">
       <table className="w-full min-w-max text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
             <th className="py-2 pl-4 pr-4">Week</th>
             <th className="py-2 pr-4">Date</th>
             <th className="py-2 pr-4">Opp</th>
@@ -256,16 +256,16 @@ function GameLogTable({ rows, columns }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.game_id} className="border-b border-slate-100 last:border-0">
-              <td className="py-2 pl-4 pr-4 text-slate-500">{row.week}</td>
-              <td className="py-2 pr-4 text-slate-500">
+            <tr key={row.game_id} className="border-b border-line last:border-0">
+              <td className="py-2 pl-4 pr-4 text-ink-dim">{row.week}</td>
+              <td className="py-2 pr-4 text-ink-dim">
                 {row.game_datetime ? new Date(row.game_datetime).toLocaleDateString() : '—'}
               </td>
-              <td className="py-2 pr-4 text-slate-900">
+              <td className="py-2 pr-4 text-ink">
                 {row.is_home ? 'vs' : '@'} {opponentAbbr(row.game_id, row.is_home) ?? '?'}
               </td>
               {columns.map((c) => (
-                <td key={c.key} className="py-2 pr-4 text-slate-900">
+                <td key={c.key} className="py-2 pr-4 text-ink">
                   {row[c.key] ?? '—'}
                 </td>
               ))}

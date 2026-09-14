@@ -35,7 +35,7 @@ const LAST_SEASON = 2025;
 const SEASONS = [CURRENT_SEASON, LAST_SEASON];
 
 const selectClass =
-  'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
+  'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
 
 export default function EdgePage() {
   const [season, setSeason] = useState(CURRENT_SEASON);
@@ -64,8 +64,8 @@ export default function EdgePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-slate-900 mb-1">Edge</h1>
-      <p className="text-sm text-slate-500 mb-4">
+      <h1 className="text-xl font-semibold text-ink mb-1">Edge</h1>
+      <p className="text-sm text-ink-dim mb-4">
         The edge agent's read on each game — which side the model's offensive-skill matchup scores lean toward,
         versus which side the sportsbook actually favors. A disagreement isn't a pick, just worth a second look.
       </p>
@@ -85,25 +85,25 @@ export default function EdgePage() {
           placeholder="Week"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
-          className="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          className="w-24 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />
-        <label className="flex items-center gap-1.5 text-sm text-slate-600 select-none">
+        <label className="flex items-center gap-1.5 text-sm text-ink-dim select-none">
           <input
             type="checkbox"
             checked={onlyDisagreements}
             onChange={(e) => setOnlyDisagreements(e.target.checked)}
-            className="rounded border-slate-300 focus:ring-2 focus:ring-slate-900"
+            className="rounded border-line focus:ring-2 focus:ring-accent"
           />
           Only disagreements
         </label>
       </div>
 
       {!week ? (
-        <p className="text-sm text-slate-500">Enter a week to see that week's games.</p>
+        <p className="text-sm text-ink-dim">Enter a week to see that week's games.</p>
       ) : loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading edges…" onRetry={refetch} />
       ) : edges.length === 0 ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-ink-dim">
           {onlyDisagreements
             ? `No disagreements found for season ${season}, week ${week}.`
             : `No games found for season ${season}, week ${week}.`}
@@ -117,27 +117,27 @@ export default function EdgePage() {
               const modelAbbr = row.model_favorite === 'home' ? homeAbbr : row.model_favorite === 'away' ? awayAbbr : null;
               const marketAbbr = row.market_favorite === 'home' ? homeAbbr : row.market_favorite === 'away' ? awayAbbr : null;
               return (
-                <li key={row.game_id} className="rounded-md border border-slate-200 bg-white px-4 py-3">
+                <li key={row.game_id} className="rounded-md border border-line bg-surface px-4 py-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="font-medium text-slate-900 text-sm">
+                      <div className="font-medium text-ink text-sm">
                         {awayAbbr} @ {homeAbbr}
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500">
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-ink-dim">
                         <span>
-                          Model: {modelAbbr ? <span className="font-medium text-slate-700">{modelAbbr}</span> : '—'}
+                          Model: {modelAbbr ? <span className="font-medium text-ink">{modelAbbr}</span> : '—'}
                           {row.model_margin !== null && row.model_margin !== undefined
                             ? ` (by ${Number(row.model_margin).toFixed(1)})`
                             : ''}
                         </span>
                         <span>
-                          Market: {marketAbbr ? <span className="font-medium text-slate-700">{marketAbbr}</span> : '—'}
+                          Market: {marketAbbr ? <span className="font-medium text-ink">{marketAbbr}</span> : '—'}
                           {row.market_margin !== null && row.market_margin !== undefined
                             ? ` (${row.market_source}, ${Number(row.market_margin).toFixed(1)})`
                             : ''}
                         </span>
                       </div>
-                      {row.note && <p className="mt-1 text-xs text-slate-400">{row.note}</p>}
+                      {row.note && <p className="mt-1 text-xs text-ink-faint">{row.note}</p>}
                     </div>
                     <EdgeBadge edge={row.edge} />
                   </div>
@@ -145,7 +145,7 @@ export default function EdgePage() {
               );
             })}
           </ul>
-          {data?.meta && <p className="mt-3 text-xs text-slate-400">{data.meta.count} game{data.meta.count === 1 ? '' : 's'}</p>}
+          {data?.meta && <p className="mt-3 text-xs text-ink-faint">{data.meta.count} game{data.meta.count === 1 ? '' : 's'}</p>}
         </>
       )}
     </div>

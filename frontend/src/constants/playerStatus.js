@@ -5,15 +5,15 @@
 // practice_squad, free_agent, retired.
 
 const STATUS_STYLE = {
-  active: 'text-emerald-700 bg-emerald-50',
-  injured_reserve: 'text-amber-700 bg-amber-50',
-  practice_squad: 'text-slate-500 bg-slate-100',
-  free_agent: 'text-slate-500 bg-slate-100',
-  retired: 'text-slate-400 bg-slate-100',
+  active: 'text-positive bg-positive/12',
+  injured_reserve: 'text-caution bg-caution/12',
+  practice_squad: 'text-ink-dim bg-surface-2',
+  free_agent: 'text-ink-dim bg-surface-2',
+  retired: 'text-ink-faint bg-surface-2',
 };
 
 export function statusBadgeClass(status) {
-  return STATUS_STYLE[status] ?? 'text-slate-500 bg-slate-100';
+  return STATUS_STYLE[status] ?? 'text-ink-dim bg-surface-2';
 }
 
 export function statusLabel(status) {

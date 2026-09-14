@@ -43,9 +43,9 @@ const POSITIVE_LABELS = new Set(['FAVORABLE_MATCHUP', 'HOT', 'STRONG', 'INCREASI
 const NEGATIVE_LABELS = new Set(['TOUGH_MATCHUP', 'COLD', 'WEAK', 'DECREASING']);
 
 function badgeStyle(label) {
-  if (POSITIVE_LABELS.has(label)) return 'text-emerald-700 bg-emerald-50';
-  if (NEGATIVE_LABELS.has(label)) return 'text-red-700 bg-red-50';
-  return 'text-slate-600 bg-slate-100';
+  if (POSITIVE_LABELS.has(label)) return 'text-positive bg-positive/12';
+  if (NEGATIVE_LABELS.has(label)) return 'text-negative bg-negative/12';
+  return 'text-ink-dim bg-surface-2';
 }
 
 function formatLabel(label) {
@@ -64,16 +64,16 @@ export default function PlayerInsights({ playerId }) {
   return (
     <div className="mb-6 grid gap-2 sm:grid-cols-2">
       {withSignal.map((entry) => (
-        <div key={entry.category} className="rounded-md border border-slate-200 bg-white px-3 py-2">
+        <div key={entry.category} className="rounded-md border border-line bg-surface px-3 py-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <span className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
               {CATEGORY_LABEL[entry.category] ?? entry.category}
             </span>
             <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${badgeStyle(entry.label)}`}>
               {formatLabel(entry.label)}
             </span>
           </div>
-          {entry.note && <p className="mt-1 text-xs text-slate-500">{entry.note}</p>}
+          {entry.note && <p className="mt-1 text-xs text-ink-dim">{entry.note}</p>}
         </div>
       ))}
     </div>
