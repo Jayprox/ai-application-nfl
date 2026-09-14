@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
+import BoardPage from './pages/BoardPage';
 import GamesPage from './pages/GamesPage';
 import GameDetailPage from './pages/GameDetailPage';
 import Layout from './components/Layout';
@@ -21,6 +22,10 @@ import NotFoundPage from './pages/NotFoundPage';
 // other screen sits behind ProtectedRoute + the shared Layout (nav shell).
 // PicksPage (Part 2's first user-facing surface) added on top of the
 // original 5 — read-only wiring against the existing picks_log routes.
+// BoardPage (2026-09-14, docs/part2-roadmap.md's "Slate/Board/Game"
+// vision) is now the index redirect target instead of /games — a
+// curated front door composed from the pages already below it, see
+// BoardPage.jsx's own header comment.
 export default function App() {
   return (
     <Routes>
@@ -28,7 +33,8 @@ export default function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
-          <Route index element={<Navigate to="/games" replace />} />
+          <Route index element={<Navigate to="/board" replace />} />
+          <Route path="board" element={<BoardPage />} />
           <Route path="games" element={<GamesPage />} />
           <Route path="games/:gameId" element={<GameDetailPage />} />
           <Route path="teams" element={<TeamBrowsePage />} />

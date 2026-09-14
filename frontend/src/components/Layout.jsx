@@ -19,10 +19,13 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-line bg-surface">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
-          <NavLink to="/teams" className="font-semibold tracking-tight text-ink">
+          <NavLink to="/board" className="font-semibold tracking-tight text-ink">
             Chalk That <span className="text-ink-faint">NFL</span>
           </NavLink>
           <nav className="flex items-center gap-1">
+            <NavLink to="/board" className={navLinkClass}>
+              Board
+            </NavLink>
             <NavLink to="/games" className={navLinkClass}>
               Games
             </NavLink>

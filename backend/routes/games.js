@@ -3,6 +3,16 @@
  * =========================================================================
  * GET /games?season=&week=  — one week's full schedule: both teams, kickoff
  *                              time, stadium, weather, score, and status.
+ * GET /games/current-week    — resolves "this week" to {season, week} —
+ *                              added 2026-09-14 for BoardPage.jsx's front
+ *                              door, which needs a sensible default
+ *                              without asking the user to type one (unlike
+ *                              GamesPage/RankingsPage/EdgePage/PortfolioPage,
+ *                              which all require manual entry). Shares
+ *                              lib/current-week.js's query with the chat
+ *                              orchestrator's own get_current_week tool —
+ *                              see that file's header for why this used to
+ *                              only exist inside orchestrator.js.
  * GET /games/:gameId         — single game, same row shape as above — the
  *                              per-game deep dive page's (GameDetailPage.jsx)
  *                              primary fetch. Composes with the pre-existing
@@ -46,6 +56,7 @@
 
 const express = require('express');
 const { query } = require('../db');
+const { getCurrentWeek } = require('../lib/current-week');
 
 const router = express.Router();
 
@@ -83,6 +94,25 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[routes/games] list failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/current-week — resolves "this week" to {season, week} for
+// clients that need a sensible default without asking the user to enter
+// one (BoardPage.jsx's primary/gating fetch). Registered here, BEFORE
+// GET /:gameId below, so this literal path isn't swallowed by that
+// param route — Express matches routes in registration order and
+// "current-week" would otherwise bind to :gameId. Shares its query with
+// backend/lib/orchestrator.js's own get_current_week tool case via
+// lib/current-week.js — one source of truth, not two copies.
+router.get('/current-week', async (req, res) => {
+  try {
+    const current = await getCurrentWeek();
+    if (!current) return res.status(404).json({ error: 'no games found in the schedule' });
+    res.json({ data: current });
+  } catch (err) {
+    console.error('[routes/games] current-week failed:', err);
     res.status(500).json({ error: 'internal error' });
   }
 });

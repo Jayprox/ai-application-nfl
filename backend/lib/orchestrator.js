@@ -42,6 +42,7 @@ const { query } = require('../db');
 const { rankMatchups, STAT_CATEGORIES } = require('./ranking');
 const { listEdges } = require('./edge');
 const { computePlayerInsights } = require('./insights');
+const { getCurrentWeek } = require('./current-week');
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -164,12 +165,11 @@ async function executeTool(name, input) {
     }
 
     case 'get_current_week': {
-      const { rows: upcoming } = await query(
-        `SELECT season, week FROM games WHERE status = 'scheduled' ORDER BY game_datetime ASC LIMIT 1`
-      );
-      if (upcoming[0]) return upcoming[0];
-      const { rows: latest } = await query(`SELECT season, week FROM games ORDER BY game_datetime DESC LIMIT 1`);
-      return latest[0] || { error: 'No games found in the schedule.' };
+      // Shared with GET /games/current-week (backend/routes/games.js) via
+      // lib/current-week.js — see that file's header for why this used to
+      // be the only place this query lived.
+      const current = await getCurrentWeek();
+      return current || { error: 'No games found in the schedule.' };
     }
 
     case 'get_rankings': {
