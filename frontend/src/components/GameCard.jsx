@@ -24,6 +24,9 @@ const GAME_SLOT_LABEL = {
   monday_night: 'Monday Night',
 };
 
+// Deliberately renders in the viewer's own browser timezone rather than
+// pinned to ET — decided 2026-09-14, considered and explicitly rejected
+// pinning to ET despite NFL kickoffs usually being talked about that way.
 function formatKickoff(iso) {
   if (!iso) return null;
   return new Date(iso).toLocaleString('en-US', {
