@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApiFetch } from '../hooks/useApiFetch';
 import AsyncState from '../components/AsyncState';
+import EdgeBadge from '../components/EdgeBadge';
 
 /**
  * Edge page — frontend surface for the edge agent (GET /edge,
@@ -35,21 +36,6 @@ const SEASONS = [CURRENT_SEASON, LAST_SEASON];
 
 const selectClass =
   'rounded-md border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900';
-
-const EDGE_BADGE = {
-  true: { label: 'Disagreement', className: 'text-amber-700 bg-amber-50' },
-  false: { label: 'Agrees', className: 'text-emerald-700 bg-emerald-50' },
-  null: { label: 'No signal', className: 'text-slate-500 bg-slate-100' },
-};
-
-function EdgeBadge({ edge }) {
-  const badge = EDGE_BADGE[String(edge)];
-  return (
-    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${badge.className}`}>
-      {badge.label}
-    </span>
-  );
-}
 
 export default function EdgePage() {
   const [season, setSeason] = useState(CURRENT_SEASON);

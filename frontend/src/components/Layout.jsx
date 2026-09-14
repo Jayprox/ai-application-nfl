@@ -23,6 +23,9 @@ export default function Layout() {
             Chalk That <span className="text-slate-400">NFL</span>
           </NavLink>
           <nav className="flex items-center gap-1">
+            <NavLink to="/games" className={navLinkClass}>
+              Games
+            </NavLink>
             <NavLink to="/teams" className={navLinkClass}>
               Teams
             </NavLink>
