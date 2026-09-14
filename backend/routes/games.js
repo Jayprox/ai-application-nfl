@@ -21,13 +21,15 @@
  * week's games" — a season with no week filter would return the entire
  * year's schedule for no real use case this page has.
  *
- * Status is read straight from games.status and is honestly only ever
- * 'scheduled' or 'final' today — worker/ingestion-worker.js's
- * syncSchedule() has no path that writes 'in_progress' (confirmed
- * 2026-09-13, see docs/part2-roadmap.md's "refresh cadence" backlog item).
- * This route does not fake a live state; a still-being-played game shows
- * as 'scheduled' with null scores until the next sync_schedule run marks
- * it 'final', matching this app's "don't fake a reading" convention.
+ * Status is read straight from games.status. As of 2026-09-14 that can
+ * genuinely be 'in_progress' during a game's live window — a separate
+ * worker job, sync_live_scores, writes status/home_score/away_score on a
+ * ~10-minute cadence while a game is live (see docs/part2-roadmap.md's
+ * "refresh cadence lags same-day results" backlog item and that job's
+ * own header comment in worker/ingestion-worker.js for the Highlightly
+ * quota math behind that cadence). This route still doesn't fake
+ * anything: before sync_live_scores' first successful tick for a given
+ * game, status stays 'scheduled' with null scores exactly as before.
  * =========================================================================
  */
 

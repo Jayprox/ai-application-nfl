@@ -167,33 +167,64 @@ actually shipped:
 - Watch `sync_live_stats` across more live games to confirm the
   Highlightly stat map holds up broadly (one game's box score is
   confirmed so far).
-- Confirm the 2026-09-13 Highlightly quota-cache fix holds up across a
-  full Sunday slate of concurrent live games, not just the first one
-  observed.
-- **2026-09-13, backlog — refresh cadence lags same-day results.**
-  `sync_historical_stats` (once every 24h) and `matchup-scores-cron`
-  (`0 10 * * *` UTC, once daily) are both fixed-schedule, so a Sunday's
-  games finishing through the afternoon/evening don't reach Rankings/
-  Season avg/matchup scores until the *next* day's runs — confirmed live:
-  Brock Purdy (49ers/Rams already final) showed a synced game, Jalen
-  Hurts (game still in progress) showed none. The pipeline is working
-  correctly, just once-a-day. Not fixed yet — needs more research before
-  picking an approach. Candidates, undecided:
-    1. A manual re-trigger (endpoint or script) to force both jobs
-       on demand — cheapest, no schedule change, but relies on someone
-       remembering to run it.
-    2. Multiple scheduled runs on Sundays keyed to typical NFL window
-       end times (proposed: 4:30pm, 7:45pm, 11:30pm ET) instead of the
-       single daily run — easy to add as more cron triggers, but the
-       times are a guess at real broadcast-window ends that needs
-       validating against an actual Sunday slate, and anything finishing
-       off-schedule (weather delay, overtime) still waits for the next
-       window.
-    3. True live scoring off `sync_live_stats`'s already-live box scores
-       (it writes into the same tables every 20s during a live game) —
-       the biggest lift, and not just an engineering one: needs a real
-       product call on whether a score built from a partial game is
-       honest to show as the same kind of number as one built from a
-       final game, plus what recent-form/role-trend even mean when this
-       week's own game isn't done yet.
+- Confirm the Highlightly quota-cache fix (2026-09-13,
+  `findHighlightlyMatch`'s module-scope cache) holds up across a full
+  Sunday slate of concurrent live games. **Correction, 2026-09-14:** the
+  original incident writeup below said `sync_live_stats` polled "every
+  20s" — that was never actually true. `isDue()`'s `'game-window'`
+  schedule type ignored the job's `pollSeconds`/`intervalMinutes`
+  entirely, so the real cadence was always the scheduler's own 60s tick.
+  Fixed alongside the live-scoring work below (see
+  `LIVE_STATS_INTERVAL_MINUTES`'s comment in
+  `worker/ingestion-worker.js`) — `sync_live_stats` now really does
+  throttle to a real interval, not just a documented one.
+- **Refresh cadence lags same-day results — Phase A (scoreboard) done,
+  2026-09-14.** Went with candidate 3 below (true live scoring off
+  Highlightly), but scoped narrowly: a new `sync_live_scores` worker job
+  writes `games.status`/`home_score`/`away_score` during a game's live
+  window via Highlightly's `/matches` list endpoint — confirmed batched
+  (one call returns every game for a date, not one call per game, unlike
+  `/box-score/{id}`) — on a ~10-minute cadence sized against the shared
+  100-request/day quota. See that job's own header comment in
+  `worker/ingestion-worker.js` for the real cost math (worst-case full
+  Sunday: ~66 calls just for `sync_live_scores`, ~104 for
+  `sync_live_stats` at its own newly-real 30-minute interval — both
+  deliberately conservative rather than precise, backstopped by the
+  existing 429 circuit breaker). `GameCard`/`StatusBadge` show a Live
+  pill + running score the same way a final score already renders — no
+  schema change needed, `games.status`/`home_score`/`away_score` already
+  supported `'in_progress'`. Deliberately NOT done as part of this:
+    - The product question from candidate 3's original framing below —
+      whether/how a partial game's stats should feed `recent_form`/
+      `role_trend` — is untouched. `insights.js` stays gated to
+      `status='final'`; only the scoreboard reads live data now.
+    - What Highlightly's `state.report`/`state.description` actually say
+      DURING a live game (only a finished game's values — "Final"/
+      "Finished" — are confirmed, from the same real captured response
+      that confirmed `state.score.current`). Any other value is logged
+      once (`unrecognizedLiveScoreReports` in `sync_live_scores`) and
+      treated as `in_progress` rather than guessed — needs checking
+      against a real live capture the first time this runs during an
+      actual game.
+    - `sync_injury_reports`' own Sunday cost: it queries every
+      `status='scheduled'` game within 4 days, every 3 hours on Sundays.
+      A Sunday's own games stay `'scheduled'` in our DB most of the day
+      (only the next day's `sync_schedule` run used to flip that;
+      `sync_live_scores` can now flip it same-day, but only for games
+      it's already successfully polled), so on a full ~13-16 game Sunday
+      slate, `sync_injury_reports` alone could approach or exceed the
+      100/day quota — independent of anything live-scoring related, and
+      sharing the same quota as both jobs above. Not measured or fixed
+      here — flagged as a real, separate follow-up discovered while
+      sizing the cadence above, not a guess.
+  Original three candidates, for the record (2026-09-13):
+    1. A manual re-trigger (endpoint or script) to force both
+       `sync_historical_stats`/`matchup-scores-cron` on demand —
+       cheapest, no schedule change, but relies on someone remembering to
+       run it. Not pursued.
+    2. Multiple scheduled runs on Sundays keyed to typical NFL window end
+       times — easy to add, but a guess at real broadcast-window ends.
+       Not pursued.
+    3. True live scoring off `sync_live_stats`'s already-live box
+       scores — chosen, see above for the actual scope it shipped with.
 - Phase 3 (frontend redesign) — scope and timing not yet decided.

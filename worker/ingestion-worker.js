@@ -698,6 +698,54 @@ const HIGHLIGHTLY_BASE = `https://${HIGHLIGHTLY_HOST}`;
 const HIGHLIGHTLY_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
 let highlightlyCooldownUntil = 0;
 
+// ---------------------------------------------------------------------
+// Live-window polling cadence — CONFIRMED 2026-09-14 that isDue()'s
+// 'game-window' case (see below) never actually throttled anything: it
+// just checked "is a game live right now", so sync_live_stats really
+// fired every scheduler tick (60s — the setInterval in start()) while
+// any game was live, not every `pollSeconds: 20` as its old config
+// implied. That's fine with one game live; it is very much not fine on a
+// real Sunday. getLiveGames() treats a game as "live" for its whole
+// game_datetime -> +4h window, and the early NFL slate alone runs up to
+// ~13 games concurrently through that window — so worst case at the old
+// real cadence:
+//   sync_live_stats (1 fetchHighlightly('/box-score/{id}') call PER live
+//   game, no batched form exists for it) = 13 games x 240 ticks
+//   (4h / 1min) ~= 3,100 calls in the early window alone, against a
+//   100-request/DAY quota shared with everything else this worker calls
+//   Highlightly for.
+// Two fixes, both applied here: (1) isDue()'s 'game-window' case now
+// actually honors intervalMinutes, like 'fixed' does. (2) sync_live_stats
+// gets a real interval instead of a fake one. Picked conservatively
+// rather than precisely — the existing 429 circuit breaker
+// (highlightlyOnCooldown/noteHighlightly429 above) is the real backstop
+// if a maximal Sunday still exceeds budget; these constants are what to
+// tune first if that happens, or if this account ever moves off the free
+// tier:
+//   13 games x (240min / 30min interval) = 8 ticks/game x 13 ~= 104
+//   calls in just the early window — still tight against 100/day shared
+//   with sync_live_scores and sync_injury_reports (see
+//   docs/part2-roadmap.md for sync_injury_reports' own, separate,
+//   NOT-yet-addressed Sunday cost), but a ~30x cut from the old effective
+//   cadence, and per-player box-score freshness during a live game isn't
+//   consumed by anything today (insights.js stays gated to
+//   status='final' — see syncLiveScores() below for why that's
+//   deliberately untouched).
+const LIVE_STATS_INTERVAL_MINUTES = 30;
+
+// sync_live_scores (below) is cheap by comparison: ONE /matches list
+// call covers every live game at once (confirmed 2026-09-14 against a
+// real full-Sunday response — date=2025-09-07 returned all 12 of that
+// day's games in one call, no per-team filter needed), not one call per
+// game like /box-score/{id}. "Some game is live" holds almost
+// continuously across a full NFL Sunday (1pm ET slate through
+// Sunday/Monday night, ~11 hours), so even a single shared call per tick
+// adds up: 11h x 60min / 10min interval = ~66 calls on a maximal Sunday.
+// Chosen to keep the scoreboard reasonably current (worst case ~10
+// minutes stale) while leaving room in the shared 100/day budget for
+// sync_live_stats above and the existing sync_injury_reports job.
+const LIVE_SCORE_INTERVAL_MINUTES = 10;
+
 function highlightlyOnCooldown() {
   return Date.now() < highlightlyCooldownUntil;
 }
@@ -763,16 +811,19 @@ function toHighlightlyAbbr(abbr) {
 //
 // Cached at MODULE scope (highlightlyMatchCache below), not per-job-run —
 // CONFIRMED root cause of a 429 storm against Highlightly's 100-req/day
-// free tier (2026-09-13): sync_live_stats polls every 20s during a live
-// game window, and with a cache scoped to a single job invocation, every
-// one of those ticks re-ran up to 3 /matches lookups per live game (plus
-// a /box-score call) from scratch — dozens of requests every 20 seconds,
-// which exhausts the whole daily quota within about a minute of the
-// first game window opening and 429s every other Highlightly call
-// (including sync_injury_reports's) for the rest of the day. A game's
-// Highlightly match id never changes once found, so resolving it once
-// and reusing it for the life of the worker process is correct, not just
-// cheaper.
+// free tier (2026-09-13): sync_live_stats fires every scheduler tick
+// while any game is live (the job's `pollSeconds: 20` config was, it
+// turns out, dead — see isDue()'s 'game-window' case and the
+// LIVE_STATS_INTERVAL_MINUTES comment below; the real cadence was always
+// the scheduler's own 60s tick, corrected 2026-09-14), and with a cache
+// scoped to a single job invocation, every one of those ticks re-ran up
+// to 3 /matches lookups per live game (plus a /box-score call) from
+// scratch — dozens of requests a minute, which exhausts the whole daily
+// quota within about a minute of the first game window opening and 429s
+// every other Highlightly call (including sync_injury_reports's) for the
+// rest of the day. A game's Highlightly match id never changes once
+// found, so resolving it once and reusing it for the life of the worker
+// process is correct, not just cheaper.
 //
 // Only a CONFIRMED "no match" (a real, successful response with zero
 // results across all three date candidates) is cached permanently — a
@@ -1241,6 +1292,131 @@ async function syncLiveStats() {
 }
 
 // ---------------------------------------------------------------------
+// Job body — sync_live_scores, REAL. Added 2026-09-14 for the
+// "refresh cadence lags same-day results" backlog item (docs/part2-
+// roadmap.md), scoped deliberately to ONLY the scoreboard (games.status/
+// home_score/away_score) — see that doc for why feeding a partial game's
+// stats into insights.js's recent_form/role_trend is a separate,
+// unresolved product question this job does NOT touch (insights.js
+// stays gated to status='final', unchanged).
+//
+// Deliberately a separate job from sync_live_stats rather than folded
+// into it, because it hits a different Highlightly endpoint with very
+// different cost characteristics: /matches?date=&league=NFL (no team
+// filter) returns EVERY game for that date in one response — confirmed
+// 2026-09-14 against a real request (date=2025-09-07 returned all 12 of
+// that Sunday's games, pagination.totalCount: 12) — versus /box-score/
+// {id}, which only exists per-match with no batched form. That's what
+// lets this job afford a much shorter interval (see
+// LIVE_STATS_INTERVAL_MINUTES/LIVE_SCORE_INTERVAL_MINUTES above) than
+// sync_live_stats can: one call covers every concurrently-live game, not
+// one call per game.
+//
+// Field mapping, confirmed from that same real response (WAS 21-6 NYG,
+// matchId 262393, already-FINAL by the time it was captured):
+//   state.score.current  -> "home - away", e.g. "21 - 6" for WSH
+//                            (home, scored 21) vs NYG (away, scored 6) —
+//                            matches homeTeam being listed first in the
+//                            same object.
+//   state.report          -> "Final" once the game is over.
+//   state.description     -> "Finished" once the game is over.
+// What's NOT yet confirmed: what report/description say DURING a live
+// game (e.g. "3rd Quarter"? "In Progress"?) — no live-game response has
+// been captured yet, only a finished one. Rather than guess (the mistake
+// STAT_FIELD_MAP/INJURY_STATUS_MAP already made once, see this file's
+// header), any report value that isn't exactly "Final" is treated as
+// in_progress and logged once via unrecognizedLiveScoreReports so it can
+// be checked against a real live capture the first time this actually
+// runs during a game — same "log once, don't guess" pattern
+// syncLiveStats uses for unrecognized stat keys.
+//
+// Team matching reuses toHighlightlyAbbr()/HIGHLIGHTLY_ABBR_ALIASES
+// (same WAS -> WSH mismatch already confirmed for the injuries/box-score
+// paths) rather than a new lookup table.
+// ---------------------------------------------------------------------
+
+const unrecognizedLiveScoreReports = new Set();
+
+async function syncLiveScores() {
+  if (!process.env.HIGHLIGHTLY_API_KEY) {
+    console.warn('[job:sync_live_scores] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+  if (highlightlyOnCooldown()) {
+    console.warn(`[job:sync_live_scores] Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429s) — skipping this tick`);
+    return { recordsProcessed: 0 };
+  }
+
+  const games = await getLiveGames();
+  if (!games.length) return { recordsProcessed: 0 };
+
+  const { abbrByTeamId } = await loadTeamNameMap();
+
+  // Almost always one calendar date; a Sunday/Monday-night game kicking
+  // off near UTC midnight can put two dates in play in the same tick.
+  const dates = [...new Set(games.map((g) => new Date(g.game_datetime).toISOString().slice(0, 10)))];
+
+  const matchByAbbrPair = new Map(); // `${hlHomeAbbr}@${hlAwayAbbr}` -> Highlightly match object
+  for (const date of dates) {
+    let payload;
+    try {
+      payload = await fetchHighlightly('/matches', { date, league: 'NFL', limit: 20 });
+    } catch (err) {
+      console.warn(`[job:sync_live_scores] /matches lookup failed for ${date} (${err.message})`);
+      continue;
+    }
+    const matches = Array.isArray(payload) ? payload : payload?.data || [];
+    for (const m of matches) {
+      const homeAbbr = m.homeTeam?.abbreviation;
+      const awayAbbr = m.awayTeam?.abbreviation;
+      if (!homeAbbr || !awayAbbr) continue;
+      matchByAbbrPair.set(`${homeAbbr}@${awayAbbr}`, m);
+    }
+  }
+
+  let processed = 0;
+  for (const game of games) {
+    const hlHomeAbbr = toHighlightlyAbbr(abbrByTeamId[game.home_team_id]);
+    const hlAwayAbbr = toHighlightlyAbbr(abbrByTeamId[game.away_team_id]);
+    if (!hlHomeAbbr || !hlAwayAbbr) continue;
+
+    const match = matchByAbbrPair.get(`${hlHomeAbbr}@${hlAwayAbbr}`);
+    if (!match?.state) continue;
+
+    const scoreLine = match.state.score?.current;
+    const parts = typeof scoreLine === 'string'
+      ? scoreLine.split('-').map((s) => parseInt(s.trim(), 10))
+      : null;
+    if (!parts || parts.length !== 2 || parts.some((n) => Number.isNaN(n))) continue;
+    const [homeScore, awayScore] = parts;
+
+    const report = (match.state.report || '').trim();
+    const isFinal = report.toLowerCase() === 'final';
+
+    if (!isFinal) {
+      const key = report || '(empty)';
+      if (!unrecognizedLiveScoreReports.has(key)) {
+        unrecognizedLiveScoreReports.add(key);
+        console.warn(`[job:sync_live_scores] in-progress report "${report}" (description "${match.state.description}") not yet confirmed against a real live capture — treating game ${game.game_id} as in_progress regardless`);
+      }
+    }
+
+    // Never downgrade a game the daily nflverse sync_schedule already
+    // finalized — this job is a same-day head start on 'final', not a
+    // replacement for that authoritative source.
+    const { rowCount } = await pool.query(
+      `UPDATE games SET status = $2, home_score = $3, away_score = $4
+       WHERE game_id = $1 AND status <> 'final'`,
+      [game.game_id, isFinal ? 'final' : 'in_progress', homeScore, awayScore]
+    );
+    processed += rowCount;
+  }
+
+  console.log(`[job:sync_live_scores] updated ${processed} of ${games.length} live game(s)`);
+  return { recordsProcessed: processed };
+}
+
+// ---------------------------------------------------------------------
 // Job body — sync_odds, REAL (The Odds API — the-odds-api.com, free
 // tier). Part 2 Phase 1's highest-leverage data gap: without odds, no
 // agent can compare its own read on a matchup against what the market
@@ -1605,8 +1781,13 @@ const JOBS = {
   },
   sync_live_stats: {
     source: 'live_stats_vendor',
-    schedule: { type: 'game-window', pollSeconds: 20 },
+    schedule: { type: 'game-window', intervalMinutes: LIVE_STATS_INTERVAL_MINUTES },
     run: syncLiveStats,
+  },
+  sync_live_scores: {
+    source: 'live_stats_vendor',
+    schedule: { type: 'game-window', intervalMinutes: LIVE_SCORE_INTERVAL_MINUTES },
+    run: syncLiveScores,
   },
   sync_odds: {
     source: 'the-odds-api',
@@ -1669,7 +1850,17 @@ async function isDue(jobType, job, now) {
       return isInjuryReportWindowDue(now, lastRunAt[jobType]);
 
     case 'game-window':
-      return isGameWindowActive(now);
+      // intervalMinutes wasn't honored here until 2026-09-14 — this used
+      // to just return isGameWindowActive(now), so a job with schedule
+      // { type: 'game-window' } fired on literally every scheduler tick
+      // (every 60s, via the setInterval in start() below) for as long as
+      // any game was live, no matter what pollSeconds/intervalMinutes it
+      // declared. sync_live_stats's old `pollSeconds: 20` never actually
+      // throttled anything because of this — see LIVE_STATS_INTERVAL_MINUTES
+      // and LIVE_SCORE_INTERVAL_MINUTES below for why that matters at
+      // Highlightly's 100-req/day quota.
+      if (!(await isGameWindowActive(now))) return false;
+      return minutesSince(lastRunAt[jobType], now) >= (schedule.intervalMinutes ?? 0);
 
     default:
       return false;

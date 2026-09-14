@@ -40,6 +40,11 @@ function formatKickoff(iso) {
 
 export default function GameCard({ game, edge, odds }) {
   const isFinal = game.status === 'final';
+  // Live scores land via sync_live_scores (2026-09-14) on the same
+  // games.status/home_score/away_score columns a final game already
+  // uses — no separate "live score" shape, so the score line below is
+  // shared by both states rather than duplicated.
+  const showScore = isFinal || game.status === 'in_progress';
 
   return (
     <div className="rounded-md border border-line bg-surface px-4 py-3">
@@ -61,7 +66,7 @@ export default function GameCard({ game, edge, odds }) {
             {game.stadium_name ? ` · ${game.stadium_name}` : ''}
           </div>
         </div>
-        {isFinal && (
+        {showScore && (
           <div className="text-right shrink-0">
             <div className="text-sm font-semibold text-ink">
               {game.away_score}–{game.home_score}
