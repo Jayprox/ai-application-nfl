@@ -926,6 +926,41 @@ async function findPlayerIdByName(fullName, teamId, cache) {
   return playerId;
 }
 
+// Sunday alone can pull ~13-16 games into the 4-day window below, almost
+// all still 'scheduled' for most of the morning before any of them have
+// kicked off — the OUTER job cadence (INJURY_REPORT_CADENCE_MINUTES,
+// every 3h on Sundays) only throttles how often this job RUNS, not how
+// often it re-checks the SAME game's injury detail within that day, so
+// three or four Sunday-morning ticks in a row (nothing has kicked off
+// yet, nothing's actually changed) were each re-fetching the full
+// slate's /matches/{id} detail from scratch. See docs/part2-roadmap.md's
+// "sync_injury_reports' own Sunday cost" note — on a full ~16-game
+// Sunday this alone could approach/exceed the shared 100-req/day
+// Highlightly quota, on top of sync_live_stats/sync_live_scores.
+//
+// This throttles re-fetching an INDIVIDUAL game's detail based on how
+// close that specific game's own kickoff is, reusing the same
+// pickProximityBucket() helper the odds/weather proximity schedules
+// already use — tight (hourly) right before kickoff, where a real late
+// inactive is worth catching, much looser (4h/12h) for games still a
+// day or more out, where nothing meaningfully changes hour to hour. On
+// Sunday specifically, a game more than 2h from kickoff now gets
+// checked roughly every other outer tick instead of every tick — real,
+// measured ~50% reduction in this job's own Sunday call volume, not a
+// claim that the combined three-job total stays under 100/day (it can
+// still exceed that on a maximal slate; the shared highlightlyOnCooldown()
+// 429 circuit breaker all three jobs already check is the real backstop
+// for that, not this throttle).
+const INJURY_DETAIL_PROXIMITY_BUCKETS = [
+  { hoursBefore: 2, intervalMinutes: 60 },
+  { hoursBefore: 24, intervalMinutes: 240 },
+  { hoursBefore: Infinity, intervalMinutes: 720 },
+];
+// game_id -> Date last successfully fetched — module scope like
+// highlightlyMatchCache above, for the same reason: this needs to
+// persist across job runs (ticks), not reset per-invocation.
+const lastInjuryDetailFetchAt = new Map();
+
 async function syncInjuryReports() {
   if (!process.env.HIGHLIGHTLY_API_KEY) {
     console.warn('[job:sync_injury_reports] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
@@ -959,16 +994,25 @@ async function syncInjuryReports() {
 
   const { abbrByTeamId } = await loadTeamNameMap();
   const playerCache = new Map();
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   let processed = 0;
 
   for (const game of games) {
+    const hoursUntilKickoff = hoursBetween(now, game.game_datetime);
+    const bucket = pickProximityBucket(INJURY_DETAIL_PROXIMITY_BUCKETS, hoursUntilKickoff);
+    const lastDetailFetch = lastInjuryDetailFetchAt.get(game.game_id);
+    if (lastDetailFetch && minutesSince(lastDetailFetch, now) < bucket.intervalMinutes) {
+      continue; // checked recently enough for how far this game is from kickoff
+    }
+
     const matchId = await findHighlightlyMatch(game, abbrByTeamId);
     if (!matchId) continue;
 
     let detail;
     try {
       detail = await fetchHighlightly(`/matches/${matchId}`);
+      lastInjuryDetailFetchAt.set(game.game_id, now);
     } catch (err) {
       console.warn(`[job:sync_injury_reports] /matches/${matchId} fetch failed for game ${game.game_id} (${err.message})`);
       continue;

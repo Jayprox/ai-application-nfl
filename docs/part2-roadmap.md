@@ -206,17 +206,30 @@ actually shipped:
       treated as `in_progress` rather than guessed — needs checking
       against a real live capture the first time this runs during an
       actual game.
-    - `sync_injury_reports`' own Sunday cost: it queries every
-      `status='scheduled'` game within 4 days, every 3 hours on Sundays.
-      A Sunday's own games stay `'scheduled'` in our DB most of the day
-      (only the next day's `sync_schedule` run used to flip that;
-      `sync_live_scores` can now flip it same-day, but only for games
-      it's already successfully polled), so on a full ~13-16 game Sunday
-      slate, `sync_injury_reports` alone could approach or exceed the
-      100/day quota — independent of anything live-scoring related, and
-      sharing the same quota as both jobs above. Not measured or fixed
-      here — flagged as a real, separate follow-up discovered while
-      sizing the cadence above, not a guess.
+    - **`sync_injury_reports`' own Sunday cost — throttled, 2026-09-14.**
+      It queries every `status='scheduled'` game within 4 days, and the
+      outer job cadence (every 3h on Sundays) was only throttling how
+      often the job *ran*, not how often it re-fetched the SAME game's
+      injury detail within that run window — a Sunday's own games mostly
+      stay `'scheduled'` all morning before any of them kick off, so 3-4
+      back-to-back Sunday ticks were each re-fetching a full ~13-16 game
+      slate's `/matches/{id}` detail from scratch, which alone could
+      approach/exceed the 100/day quota, independent of anything live-
+      scoring related. Fixed by adding a per-game proximity throttle
+      inside `syncInjuryReports()` (`INJURY_DETAIL_PROXIMITY_BUCKETS` in
+      `worker/ingestion-worker.js`, reusing the same `pickProximityBucket()`
+      helper the odds/weather proximity schedules already use) — a game
+      more than 2h from its own kickoff is now re-checked roughly every
+      other outer tick instead of every tick (a real, measured ~50%
+      reduction in this job's own Sunday call volume), while a game
+      within 2h of kickoff still gets checked every tick so a real late
+      inactive isn't missed. This is a measured cut to this one job's own
+      contribution, not a claim that the combined `sync_live_stats` +
+      `sync_live_scores` + `sync_injury_reports` total now stays under
+      100/day on a maximal Sunday — it still can; the shared
+      `highlightlyOnCooldown()` 429 circuit breaker all three jobs
+      already check remains the real backstop for that combined total,
+      same as before this fix.
   Original three candidates, for the record (2026-09-13):
     1. A manual re-trigger (endpoint or script) to force both
        `sync_historical_stats`/`matchup-scores-cron` on demand —
