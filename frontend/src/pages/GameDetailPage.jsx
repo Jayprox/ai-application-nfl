@@ -31,6 +31,25 @@ import InjuryBadge from '../components/InjuryBadge';
 const MARKET_LABEL = { spreads: 'Spread', h2h: 'Moneyline', totals: 'Total' };
 const MARKET_ORDER = ['spreads', 'h2h', 'totals'];
 
+// Book display names + display order (2026-09-15): The Odds API syncs
+// every US bookmaker it has for a game (worker/ingestion-worker.js), but
+// showing all of them turns this into a long undifferentiated list of
+// raw lowercase keys. Narrow to the four majors most bettors check,
+// plus Caesars (still synced under its pre-rebrand API key,
+// williamhill_us) with a real display name instead of the bare key.
+// Scoped to this page's display only -- GET /odds/games/:id still
+// returns every book, and backend/lib/edge.js's model-vs-market calc
+// keeps reading all of them, so narrowing this list doesn't change
+// what feeds Edge.
+const BOOKMAKER_DISPLAY = {
+  betmgm: 'BetMGM',
+  draftkings: 'DraftKings',
+  fanduel: 'FanDuel',
+  bovada: 'Bovada',
+  williamhill_us: 'Caesars',
+};
+const BOOKMAKER_ORDER = ['betmgm', 'draftkings', 'fanduel', 'bovada', 'williamhill_us'];
+
 function formatKickoff(iso) {
   if (!iso) return null;
   return new Date(iso).toLocaleString('en-US', {
@@ -94,10 +113,12 @@ export default function GameDetailPage() {
         ? game.away_team_abbr
         : null;
 
-  const bookmakers = oddsData?.data?.bookmakers ?? [];
+  const bookmakers = (oddsData?.data?.bookmakers ?? []).filter((b) => BOOKMAKER_ORDER.includes(b.bookmaker));
   const oddsByMarket = MARKET_ORDER.map((market) => ({
     market,
-    rows: bookmakers.filter((b) => b.market === market),
+    rows: bookmakers
+      .filter((b) => b.market === market)
+      .sort((a, b) => BOOKMAKER_ORDER.indexOf(a.bookmaker) - BOOKMAKER_ORDER.indexOf(b.bookmaker)),
   })).filter((g) => g.rows.length > 0);
 
   const homeInjuries = injuriesData?.data?.home ?? [];
@@ -182,7 +203,7 @@ export default function GameDetailPage() {
                         key={`${r.bookmaker}-${i}`}
                         className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
                       >
-                        <span className="text-ink">{r.bookmaker}</span>
+                        <span className="text-ink">{BOOKMAKER_DISPLAY[r.bookmaker] ?? r.bookmaker}</span>
                         <span className="text-xs text-ink-dim tabular-nums">
                           {market === 'spreads' &&
                             `${game.away_team_abbr} ${formatPoint(r.away_point)} (${formatPoint(r.away_price)}) · ${game.home_team_abbr} ${formatPoint(r.home_point)} (${formatPoint(r.home_price)})`}
