@@ -17,14 +17,20 @@ import EdgeBadge from '../components/EdgeBadge';
  * rather than duplicate" principle backend/routes/games.js's own header
  * comment states and the rest of this app already follows.
  *
- * Composes four read-only fetches, three of them scoped to "this week"
+ * Composes five read-only fetches, four of them scoped to "this week"
  * once GET /games/current-week (added alongside this page — see that
  * route's own comment for why it didn't already exist) resolves a
  * season/week:
  *   - GET /games/current-week   — resolves season/week; gates the page
  *   - GET /games?season=&week=  — this week's schedule (GameCard, reused as-is)
  *   - GET /edge?season=&week=&only_disagreements=true — top model-vs-market reads
+ *   - GET /odds?season=&week=   — DraftKings lines for the games grid (OddsBadge)
  *   - GET /rankings?stat_category=passing_yards&season=&week=&limit=5 — top leaders
+ *
+ * Odds wiring (2026-09-15, "add odds to the tiles" request) copies
+ * GamesPage.jsx's own oddsPath/oddsByGameId pattern exactly — same
+ * "nice-to-have overlay, doesn't gate the games section" treatment as
+ * edge already gets here, not a fifth loading/error state of its own.
  *
  * Only the current-week fetch gates the whole page (an empty schedule
  * really does mean "nothing to show yet"); each section below fetches
@@ -111,6 +117,10 @@ export default function BoardPage() {
         : null,
     [hasWeek, season, week]
   );
+  const oddsPath = useMemo(
+    () => (hasWeek ? `/odds?${new URLSearchParams({ season: String(season), week: String(week) }).toString()}` : null),
+    [hasWeek, season, week]
+  );
 
   // Live updates (2026-09-15, docs/part2-roadmap.md): background-poll
   // this week's games preview while any of them is in_progress, same
@@ -122,6 +132,7 @@ export default function BoardPage() {
     setLivePollMs(list.some((g) => g.status === 'in_progress') ? LIVE_SCORE_POLL_MS : undefined);
   }, [gamesData]);
   const { data: edgeData, error: edgeError, loading: edgeLoading, refetch: refetchEdge } = useApiFetch(edgePath);
+  const { data: oddsData } = useApiFetch(oddsPath);
   const {
     data: rankingsData,
     error: rankingsError,
@@ -142,6 +153,12 @@ export default function BoardPage() {
     for (const row of edges) map.set(row.game_id, row);
     return map;
   }, [edges]);
+
+  const oddsByGameId = useMemo(() => {
+    const map = new Map();
+    for (const row of oddsData?.data ?? []) map.set(row.game_id, row);
+    return map;
+  }, [oddsData]);
 
   const rankings = rankingsData?.data ?? [];
 
@@ -191,7 +208,12 @@ export default function BoardPage() {
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {games.map((game) => (
-                <GameCard key={game.game_id} game={game} edge={edgeByGameId.get(game.game_id)} />
+                <GameCard
+                  key={game.game_id}
+                  game={game}
+                  edge={edgeByGameId.get(game.game_id)}
+                  odds={oddsByGameId.get(game.game_id)}
+                />
               ))}
             </div>
           )}
