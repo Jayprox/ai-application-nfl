@@ -17,7 +17,7 @@ import EdgeBadge from '../components/EdgeBadge';
  * rather than duplicate" principle backend/routes/games.js's own header
  * comment states and the rest of this app already follows.
  *
- * Composes five read-only fetches, four of them scoped to "this week"
+ * Composes four read-only fetches, three of them scoped to "this week"
  * once GET /games/current-week (added alongside this page — see that
  * route's own comment for why it didn't already exist) resolves a
  * season/week:
@@ -25,7 +25,6 @@ import EdgeBadge from '../components/EdgeBadge';
  *   - GET /games?season=&week=  — this week's schedule (GameCard, reused as-is)
  *   - GET /edge?season=&week=&only_disagreements=true — top model-vs-market reads
  *   - GET /rankings?stat_category=passing_yards&season=&week=&limit=5 — top leaders
- *   - GET /picks/stats?agent_name=portfolio_agent_v1 — the portfolio agent's live record
  *
  * Only the current-week fetch gates the whole page (an empty schedule
  * really does mean "nothing to show yet"); each section below fetches
@@ -46,28 +45,20 @@ import EdgeBadge from '../components/EdgeBadge';
  * list; this page is.
  *
  * Visual design pass (2026-09-15, docs/part2-roadmap.md Phase 4): Board
- * is the app's front door, so it gets the most hero treatment — Portfolio
- * Record moved up directly under the title (the app's actual track
- * record is the single most "does this app work" number, worth more
- * visual weight than the 4th spot at the bottom), Top Edges/Rankings
- * Leaders paired into one row on wide screens instead of stacking the
- * whole page vertically, and the games grid picks up a 3rd column at lg
- * width. No fetch/data logic changed — presentational only.
+ * is the app's front door, so it gets the most hero treatment — Top
+ * Edges/Rankings Leaders paired into one row on wide screens instead of
+ * stacking the whole page vertically, and the games grid picks up a 3rd
+ * column at lg width. No fetch/data logic changed — presentational only.
+ *
+ * Portfolio Record section removed (2026-09-15, second pass): it
+ * duplicated what Record > Picks (PicksPage.jsx, GET /picks/stats) already
+ * shows at the top of its own page, above the full pick-by-pick history —
+ * that page is already reachable from the nav, so Board no longer fetches
+ * or renders a second copy of the same four stat tiles.
  */
 
 const GAMES_PREVIEW_LIMIT = 6;
 const TOP_EDGES_LIMIT = 5;
-
-function StatTile({ label, value, accent = false }) {
-  return (
-    <div className="rounded-md border border-line bg-surface px-3 py-3 text-center">
-      <div className={`font-display text-2xl font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>
-        {value}
-      </div>
-      <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-ink-faint">{label}</div>
-    </div>
-  );
-}
 
 function SectionHeader({ title, linkTo, linkLabel }) {
   return (
@@ -138,13 +129,6 @@ export default function BoardPage() {
     loading: rankingsLoading,
     refetch: refetchRankings,
   } = useApiFetch(rankingsPath);
-  const {
-    data: statsData,
-    error: statsError,
-    loading: statsLoading,
-    refetch: refetchStats,
-  } = useApiFetch('/picks/stats?agent_name=portfolio_agent_v1');
-
   const games = gamesData?.data ?? [];
   const previewGames = games.slice(0, GAMES_PREVIEW_LIMIT);
 
@@ -162,7 +146,6 @@ export default function BoardPage() {
   }, [edges]);
 
   const rankings = rankingsData?.data ?? [];
-  const record = statsData?.data;
 
   if (weekLoading || weekError) {
     return (
@@ -195,29 +178,10 @@ export default function BoardPage() {
         </p>
         <h1 className="font-display text-3xl font-semibold uppercase tracking-wide text-ink mb-2">Board</h1>
         <p className="max-w-2xl text-sm text-ink-dim">
-          This week's games, the edge agent's top disagreements, this week's rankings leaders, and the portfolio
-          agent's live record — click through anywhere for the full page behind it.
+          This week's games, the edge agent's top disagreements, and this week's rankings leaders — click
+          through anywhere for the full page behind it.
         </p>
       </div>
-
-      <section className="mb-8">
-        <SectionHeader title="Portfolio Record" linkTo="/picks" linkLabel="Pick history" />
-        {statsLoading || statsError ? (
-          <AsyncState loading={statsLoading} error={statsError} loadingLabel="Loading record…" onRetry={refetchStats} />
-        ) : !record || record.total === 0 ? (
-          <p className="text-sm text-ink-dim">No picks logged yet.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatTile
-              label="Record"
-              value={`${record.correct}-${record.incorrect}${record.push ? `-${record.push}` : ''}`}
-            />
-            <StatTile label="Hit rate" value={record.hit_rate_pct !== null ? `${record.hit_rate_pct}%` : '—'} accent />
-            <StatTile label="Pending" value={record.pending} />
-            <StatTile label="Total" value={record.total} />
-          </div>
-        )}
-      </section>
 
       <div className="space-y-8">
         <section>
