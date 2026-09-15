@@ -15,6 +15,11 @@ import OddsBadge from './OddsBadge';
  * anything itself. Team names link to the same TeamDetailPage the Teams
  * tab already uses — one route per team, not a second lighter view.
  *
+ * `odds` is also handed `game.status`/`home_score`/`away_score` (added
+ * 2026-09-15, "lock at kickoff + show what hit" request) so OddsBadge can
+ * grade the DraftKings line against the final score itself -- no new
+ * fetch, those fields already live on `game` from GET /games.
+ *
  * The whole card also links to GameDetailPage.jsx (2026-09-14, the
  * per-game deep dive) via an absolutely-positioned overlay <Link>, not by
  * wrapping the card's own content in a <Link> — the two team-abbreviation
@@ -102,7 +107,14 @@ export default function GameCard({ game, edge, odds }) {
             windMph={game.weather_wind_mph}
             windDirectionDeg={game.weather_wind_direction_deg}
           />
-          <OddsBadge odds={odds} homeAbbr={game.home_team_abbr} />
+          <OddsBadge
+            odds={odds}
+            homeAbbr={game.home_team_abbr}
+            awayAbbr={game.away_team_abbr}
+            status={game.status}
+            homeScore={game.home_score}
+            awayScore={game.away_score}
+          />
           {edge ? <EdgeBadge edge={edge.edge} /> : null}
         </div>
       </div>

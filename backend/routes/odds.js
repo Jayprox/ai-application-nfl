@@ -9,17 +9,26 @@
  * exposing the raw log — a "current odds" view, same idea the migration's
  * comment already flagged as the intended future read pattern.
  *
- * Deliberately its own route, not folded into POST /query — same
- * "no predictive calculations" boundary that already keeps /insights
- * separate (architecture.md §2). Odds are raw vendor data (fair game for
- * a plain read), but game_odds isn't one of the *_game_stats tables
- * /query already knows how to aggregate, and a market's shape (paired
- * home/away or over/under prices) doesn't fit /query's per-column-average
- * response shape anyway.
+ * Closing-line lock (added 2026-09-15, Board page request: "lock the
+ * values when the game starts, so it doesn't change during the game"):
+ * sync_odds keeps polling a live event and INSERTing new rows for as long
+ * as the vendor still returns it, so before this change the "latest
+ * synced_at" row could keep moving after kickoff -- in-play line moves,
+ * or a lagging removal, changing what a viewer saw mid-game. Fixed here at
+ * the read layer rather than in sync_odds itself, on purpose: game_odds
+ * stays the same append-only log (line movement over time is still
+ * queryable later, per 003_game_odds.sql's own header), and both routes
+ * below now pick the latest row *as of kickoff* once a game has left
+ * 'scheduled' -- games.game_datetime as the cutoff, games.status to know
+ * when to apply it. A 'scheduled' or 'postponed' game is unaffected and
+ * still reads the true latest sync.
  *
- * GET /odds/games/:id           — current odds for one game, all
- *                                  bookmakers/markets.
- * GET /odds?season=&week=       — current odds across every scheduled
+ * GET /odds/games/:id           — odds for one game, all bookmakers/
+ *                                  markets. Latest sync while the game is
+ *                                  'scheduled'; locked to the last sync at
+ *                                  or before kickoff once 'in_progress' or
+ *                                  'final' (see closing-line lock above).
+ * GET /odds?season=&week=       — same odds/locking rules across every
  *                                  game in that season (week optional),
  *                                  grouped by game. Built for the edge
  *                                  agent to scan a whole slate at once
@@ -65,10 +74,12 @@ router.get('/games/:id', async (req, res) => {
     if (!gameRows[0]) return res.status(404).json({ error: 'game not found' });
 
     const { rows } = await query(
-      `SELECT DISTINCT ON (bookmaker, market) *
-       FROM game_odds
-       WHERE game_id = $1
-       ORDER BY bookmaker, market, synced_at DESC`,
+      `SELECT DISTINCT ON (go.bookmaker, go.market) go.*
+       FROM game_odds go
+       JOIN games g ON g.game_id = go.game_id
+       WHERE go.game_id = $1
+         AND (g.status NOT IN ('in_progress', 'final') OR go.synced_at <= g.game_datetime)
+       ORDER BY go.bookmaker, go.market, go.synced_at DESC`,
       [id]
     );
 
@@ -109,6 +120,7 @@ router.get('/', async (req, res) => {
        FROM game_odds go
        JOIN games g ON g.game_id = go.game_id
        WHERE g.season = $1 ${weekFilter}
+         AND (g.status NOT IN ('in_progress', 'final') OR go.synced_at <= g.game_datetime)
        ORDER BY go.game_id, go.bookmaker, go.market, go.synced_at DESC`,
       params
     );
