@@ -647,8 +647,27 @@ const OPEN_METEO_FORECAST_DAYS = 10;
 function openMeteoUrl(lat, lon) {
   return (
     `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
-    `&hourly=temperature_2m,windspeed_10m,weathercode` +
+    `&hourly=temperature_2m,windspeed_10m,winddirection_10m,weathercode` +
     `&temperature_unit=fahrenheit&windspeed_unit=mph&timezone=UTC&forecast_days=${OPEN_METEO_FORECAST_DAYS}`
+  );
+}
+
+// Historical weather archive (added 2026-09-15, see syncHistoricalWeather
+// below): a *different* Open-Meteo product from the forecast endpoint
+// above, with its own host and, confirmed against Open-Meteo's own docs
+// (open-meteo.com/en/docs/historical-weather-api, checked 2026-09-15),
+// its own hourly field names -- `wind_speed_10m`/`wind_direction_10m`/
+// `weather_code` (underscored) rather than the forecast endpoint's
+// `windspeed_10m`/`weathercode`. Same WMO weather codes either way, so
+// classifyOpenMeteoCode is reused for both, not duplicated.
+const OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
+
+function openMeteoArchiveUrl(lat, lon, dateStr) {
+  return (
+    `${OPEN_METEO_ARCHIVE_URL}?latitude=${lat}&longitude=${lon}` +
+    `&start_date=${dateStr}&end_date=${dateStr}` +
+    `&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,weather_code` +
+    `&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=UTC`
   );
 }
 
@@ -710,13 +729,94 @@ async function syncForecastWeather() {
 
     const condition = classifyOpenMeteoCode(hourly.weathercode[closestIdx]);
     await pool.query(
-      `UPDATE games SET weather_condition = $2, weather_temp_f = $3, weather_wind_mph = $4 WHERE game_id = $1`,
-      [game.game_id, condition, n(hourly.temperature_2m[closestIdx]), n(hourly.windspeed_10m[closestIdx])]
+      `UPDATE games SET weather_condition = $2, weather_temp_f = $3, weather_wind_mph = $4, weather_wind_direction_deg = $5 WHERE game_id = $1`,
+      [
+        game.game_id,
+        condition,
+        n(hourly.temperature_2m[closestIdx]),
+        n(hourly.windspeed_10m[closestIdx]),
+        n(hourly.winddirection_10m ? hourly.winddirection_10m[closestIdx] : null),
+      ]
     );
     processed++;
   }
 
   console.log(`[job:sync_forecast_weather] ${processed} of ${games.length} eligible game(s) forecasted`);
+  return { recordsProcessed: processed };
+}
+
+// ---------------------------------------------------------------------
+// Job body — sync_historical_weather, added 2026-09-15 (Board page
+// weather request). sync_forecast_weather above only ever reaches games
+// that are still `status = 'scheduled'` within its 10-day lookahead --
+// once a game goes final, weather_condition stays permanently NULL for
+// any outdoor stadium (dome games are already set at schedule-sync time
+// off nflverse's own roof field, classifyWeatherCondition() above, so
+// those never hit this job's WHERE clause). This job fills that gap by
+// pulling ACTUAL recorded weather (not a forecast) for a game's own
+// kickoff hour from Open-Meteo's free historical archive, keyed by the
+// stadium's lat/lon and the game's calendar date.
+//
+// Very recently completed games can come back with no hourly data at
+// all -- Open-Meteo's own docs note their ERA5 archive has ~5 days'
+// ingest delay -- so a miss here is logged and left for a later run
+// rather than treated as an error; `status = 'final' AND
+// weather_condition IS NULL` naturally keeps re-selecting it until the
+// archive catches up.
+// ---------------------------------------------------------------------
+
+async function syncHistoricalWeather() {
+  const { rows: games } = await pool.query(
+    `SELECT g.game_id, g.game_datetime, s.latitude, s.longitude
+     FROM games g
+     JOIN stadiums s ON s.stadium_id = g.stadium_id
+     WHERE g.status = 'final' AND g.weather_condition IS NULL`
+  );
+
+  let processed = 0;
+  for (const game of games) {
+    const dateStr = new Date(game.game_datetime).toISOString().slice(0, 10);
+    let archive;
+    try {
+      const text = await fetchText(openMeteoArchiveUrl(parseFloat(game.latitude), parseFloat(game.longitude), dateStr));
+      archive = JSON.parse(text);
+    } catch (err) {
+      console.warn(`[job:sync_historical_weather] fetch failed for game ${game.game_id} (${err.message})`);
+      continue;
+    }
+
+    const hourly = archive.hourly;
+    if (!hourly || !Array.isArray(hourly.time) || !hourly.time.length) {
+      console.warn(`[job:sync_historical_weather] no hourly data yet for game ${game.game_id} (likely ERA5's ~5-day ingest delay -- will retry on a later run)`);
+      continue;
+    }
+
+    const gameMs = new Date(game.game_datetime).getTime();
+    let closestIdx = 0;
+    let closestDiff = Infinity;
+    for (let i = 0; i < hourly.time.length; i++) {
+      const diff = Math.abs(new Date(hourly.time[i] + 'Z').getTime() - gameMs);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        closestIdx = i;
+      }
+    }
+
+    const condition = classifyOpenMeteoCode(hourly.weather_code[closestIdx]);
+    await pool.query(
+      `UPDATE games SET weather_condition = $2, weather_temp_f = $3, weather_wind_mph = $4, weather_wind_direction_deg = $5 WHERE game_id = $1`,
+      [
+        game.game_id,
+        condition,
+        n(hourly.temperature_2m[closestIdx]),
+        n(hourly.wind_speed_10m[closestIdx]),
+        n(hourly.wind_direction_10m[closestIdx]),
+      ]
+    );
+    processed++;
+  }
+
+  console.log(`[job:sync_historical_weather] ${processed} of ${games.length} eligible final game(s) backfilled`);
   return { recordsProcessed: processed };
 }
 
@@ -2018,6 +2118,16 @@ const JOBS = {
       ],
     },
     run: syncForecastWeather,
+  },
+  sync_historical_weather: {
+    source: 'open-meteo',
+    // Fixed hourly sweep, same shape as grade_picks below -- this is a
+    // backlog job (catch newly-final games, retry ones ERA5 wasn't
+    // ready for yet) rather than something tied to a single game's
+    // countdown-to-kickoff, so the proximity schedule sync_forecast_weather
+    // uses doesn't fit here.
+    schedule: { type: 'fixed', intervalMinutes: 60 },
+    run: syncHistoricalWeather,
   },
   sync_injury_reports: {
     source: 'live_stats_vendor',

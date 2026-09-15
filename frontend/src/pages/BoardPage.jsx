@@ -57,7 +57,6 @@ import EdgeBadge from '../components/EdgeBadge';
  * or renders a second copy of the same four stat tiles.
  */
 
-const GAMES_PREVIEW_LIMIT = 6;
 const TOP_EDGES_LIMIT = 5;
 
 function SectionHeader({ title, linkTo, linkLabel }) {
@@ -130,7 +129,6 @@ export default function BoardPage() {
     refetch: refetchRankings,
   } = useApiFetch(rankingsPath);
   const games = gamesData?.data ?? [];
-  const previewGames = games.slice(0, GAMES_PREVIEW_LIMIT);
 
   const gamesById = useMemo(() => {
     const map = new Map();
@@ -188,21 +186,14 @@ export default function BoardPage() {
           <SectionHeader title="This Week's Games" linkTo="/games" linkLabel="Full schedule" />
           {gamesLoading || gamesError ? (
             <AsyncState loading={gamesLoading} error={gamesError} loadingLabel="Loading games…" onRetry={refetchGames} />
-          ) : previewGames.length === 0 ? (
+          ) : games.length === 0 ? (
             <p className="text-sm text-ink-dim">No games scheduled for week {week} yet.</p>
           ) : (
-            <>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {previewGames.map((game) => (
-                  <GameCard key={game.game_id} game={game} edge={edgeByGameId.get(game.game_id)} />
-                ))}
-              </div>
-              {games.length > GAMES_PREVIEW_LIMIT && (
-                <p className="mt-2 text-xs text-ink-faint">
-                  +{games.length - GAMES_PREVIEW_LIMIT} more this week — see the full schedule.
-                </p>
-              )}
-            </>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {games.map((game) => (
+                <GameCard key={game.game_id} game={game} edge={edgeByGameId.get(game.game_id)} />
+              ))}
+            </div>
           )}
         </section>
 

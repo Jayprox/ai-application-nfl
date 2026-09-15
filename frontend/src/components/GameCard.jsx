@@ -96,7 +96,12 @@ export default function GameCard({ game, edge, odds }) {
           )}
         </div>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <WeatherBadge condition={game.weather_condition} tempF={game.weather_temp_f} />
+          <WeatherBadge
+            condition={game.weather_condition}
+            tempF={game.weather_temp_f}
+            windMph={game.weather_wind_mph}
+            windDirectionDeg={game.weather_wind_direction_deg}
+          />
           <OddsBadge odds={odds} homeAbbr={game.home_team_abbr} />
           {edge ? <EdgeBadge edge={edge.edge} /> : null}
         </div>
