@@ -2283,4 +2283,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { start, JOBS, resolveIdentity, currentNflSeason };
+module.exports = { start, JOBS, runJob, resolveIdentity, currentNflSeason };

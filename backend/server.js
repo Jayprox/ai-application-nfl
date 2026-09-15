@@ -27,6 +27,7 @@ const edgeRoutes = require('./routes/edge');
 const portfolioRoutes = require('./routes/portfolio');
 const leaderboardRoutes = require('./routes/leaderboard');
 const chatRoutes = require('./routes/chat');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 
@@ -130,6 +131,10 @@ app.use('/leaderboard', leaderboardRoutes);
 // lib/orchestrator.js for the tool-calling loop and why it never
 // generates or logs a new pick itself.
 app.use('/chat', chatRoutes);
+// Manual "resync now" trigger for sync_roster (2026-09-15) — see
+// routes/admin.js for why this exists and why it's scoped to just that
+// one job rather than any/all of ingestion-worker's jobs.
+app.use('/admin', adminRoutes);
 
 // Fallback error handler — catches anything a route handler didn't
 // already wrap in its own try/catch, so a bug never surfaces as a raw
