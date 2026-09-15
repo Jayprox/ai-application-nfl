@@ -753,7 +753,22 @@ let highlightlyCooldownUntil = 0;
 // event-based "fetch once when a game flips to final" trigger instead of
 // interval polling) if/when a live box score feature actually needs
 // fresher data than this.
-const LIVE_STATS_INTERVAL_MINUTES = 120;
+//
+// CONFIRMED follow-up, 2026-09-15: the constraint this whole tension was
+// fought over went away. Confirmed directly against RapidAPI's own
+// billing dashboard: the account moved Basic (100/day) -> Pro
+// (7,500/day) -- 75x the headroom the math above was written against.
+// The "nothing consumes a live box score yet" reasoning still holds
+// (insights.js is still gated to status='final'), so this doesn't get
+// tightened to chase live-UI freshness nobody uses -- but there's no
+// reason to sit at the emergency-conservative 120min either now that the
+// quota scare is resolved. Reverted to the original 30min pick from
+// earlier the same week, before the quota-exhaustion incident forced the
+// emergency cut: 13 games x (240min / 30min) = 8 ticks/game x 13 ~= 104
+// calls in just the early window -- ~1.4% of the new 7,500/day ceiling,
+// before sync_live_scores, sync_injury_reports, or the one-time match-id
+// lookups are even added in.
+const LIVE_STATS_INTERVAL_MINUTES = 30;
 
 // sync_live_scores (below) is cheap by comparison: ONE /matches list
 // call covers every live game at once (confirmed 2026-09-14 against a
@@ -766,7 +781,17 @@ const LIVE_STATS_INTERVAL_MINUTES = 120;
 // Chosen to keep the scoreboard reasonably current (worst case ~10
 // minutes stale) while leaving room in the shared 100/day budget for
 // sync_live_stats above and the existing sync_injury_reports job.
-const LIVE_SCORE_INTERVAL_MINUTES = 10;
+//
+// CONFIRMED follow-up, 2026-09-15: same Pro-plan upgrade as
+// LIVE_STATS_INTERVAL_MINUTES above (100/day -> 7,500/day, confirmed
+// against RapidAPI's billing dashboard). Unlike that job, this one IS
+// what GameCard's live pill/score actually renders, so this is where
+// spending the new headroom shows up in the product rather than just
+// sitting unused. Cut 10 -> 2 minutes: 11h x 60min / 2min interval ~=
+// 330 calls on a maximal Sunday, still under 5% of the new daily
+// ceiling, for a scoreboard that's now at most ~2 minutes stale instead
+// of ~10.
+const LIVE_SCORE_INTERVAL_MINUTES = 2;
 
 function highlightlyOnCooldown() {
   return Date.now() < highlightlyCooldownUntil;
@@ -776,9 +801,23 @@ function noteHighlightly429() {
   highlightlyCooldownUntil = Date.now() + HIGHLIGHTLY_COOLDOWN_MS;
 }
 
+// CONFIRMED 2026-09-15: RapidAPI signals Highlightly's hard daily-quota
+// limit with HTTP 403 "You are not subscribed to this API" -- a
+// deliberately confusing message (this account IS subscribed, on the
+// Pro plan; it's RapidAPI's generic quota-exceeded response, not an
+// actual subscription problem) -- distinct from the plain HTTP 429 used
+// for the soft per-second rate limit. Before this fix, only a 429 armed
+// the cooldown below, so a 403 alone (no accompanying 429 in the same
+// tick) would NOT back off -- every other live game's match lookup that
+// tick would keep firing real requests at an already-exhausted quota
+// instead of skipping immediately, same as a 429 already does.
+function isHighlightlyQuotaError(message) {
+  return /HTTP 429/.test(message) || /HTTP 403/.test(message) && /not subscribed/i.test(message);
+}
+
 async function fetchHighlightly(path, params = {}) {
   if (highlightlyOnCooldown()) {
-    throw new Error(`Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429)`);
+    throw new Error(`Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429/403)`);
   }
   const query = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined && v !== null)
@@ -791,7 +830,7 @@ async function fetchHighlightly(path, params = {}) {
     });
     return JSON.parse(text);
   } catch (err) {
-    if (/HTTP 429/.test(err.message)) noteHighlightly429();
+    if (isHighlightlyQuotaError(err.message)) noteHighlightly429();
     throw err;
   }
 }
