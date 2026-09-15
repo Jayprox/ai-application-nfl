@@ -1,10 +1,34 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import NavGroup from './NavGroup';
 
 const navLinkClass = ({ isActive }) =>
-  `px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+  `px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
     isActive ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
   }`;
+
+// Part 2 Phase 3 nav/IA cleanup (2026-09-15) — see NavGroup.jsx's own
+// header comment for why these 9 routes (everything but Board, which
+// stays standalone as the app's front door) are grouped into 3 clusters
+// instead of 10 flat top-level links: Research (browsing raw
+// schedule/team/player data), Agents (the deterministic/LLM agent
+// surfaces this app is actually built around), Record (accountability —
+// what got picked and how it graded).
+const RESEARCH_ITEMS = [
+  { to: '/games', label: 'Games' },
+  { to: '/teams', label: 'Teams' },
+  { to: '/players', label: 'Players' },
+];
+const AGENTS_ITEMS = [
+  { to: '/rankings', label: 'Rankings' },
+  { to: '/edge', label: 'Edge' },
+  { to: '/portfolio', label: 'Portfolio' },
+  { to: '/chat', label: 'Chat' },
+];
+const RECORD_ITEMS = [
+  { to: '/picks', label: 'Picks' },
+  { to: '/leaderboard', label: 'Leaderboard' },
+];
 
 export default function Layout() {
   const { logout } = useAuth();
@@ -22,41 +46,17 @@ export default function Layout() {
           <NavLink to="/board" className="font-semibold tracking-tight text-ink">
             Chalk That <span className="text-ink-faint">NFL</span>
           </NavLink>
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-1 overflow-x-auto">
             <NavLink to="/board" className={navLinkClass}>
               Board
             </NavLink>
-            <NavLink to="/games" className={navLinkClass}>
-              Games
-            </NavLink>
-            <NavLink to="/teams" className={navLinkClass}>
-              Teams
-            </NavLink>
-            <NavLink to="/players" className={navLinkClass}>
-              Players
-            </NavLink>
-            <NavLink to="/picks" className={navLinkClass}>
-              Picks
-            </NavLink>
-            <NavLink to="/leaderboard" className={navLinkClass}>
-              Leaderboard
-            </NavLink>
-            <NavLink to="/rankings" className={navLinkClass}>
-              Rankings
-            </NavLink>
-            <NavLink to="/edge" className={navLinkClass}>
-              Edge
-            </NavLink>
-            <NavLink to="/portfolio" className={navLinkClass}>
-              Portfolio
-            </NavLink>
-            <NavLink to="/chat" className={navLinkClass}>
-              Chat
-            </NavLink>
+            <NavGroup label="Research" items={RESEARCH_ITEMS} />
+            <NavGroup label="Agents" items={AGENTS_ITEMS} />
+            <NavGroup label="Record" items={RECORD_ITEMS} />
             <button
               type="button"
               onClick={handleLogout}
-              className="ml-2 px-3 py-1.5 rounded-md text-sm font-medium text-ink-dim hover:bg-surface-2"
+              className="ml-2 px-3 py-1.5 rounded-md text-sm font-medium text-ink-dim hover:bg-surface-2 whitespace-nowrap"
             >
               Log out
             </button>

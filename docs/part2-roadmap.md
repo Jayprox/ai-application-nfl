@@ -137,7 +137,7 @@ only the orchestrator has an LLM in the loop.
 
 ## Part 2, Phase 3 — Frontend redesign
 
-**In progress.** The Slate/Board/Game shape this phase was aiming for
+**Status: done.** The Slate/Board/Game shape this phase was aiming for
 (per-game deep dive, per-market ranked boards, a portfolio builder, a
 logged track record) turned out to already exist as separate working
 pages by the time "build the Board" was actually scoped — Rankings, Edge,
@@ -158,13 +158,30 @@ in two pieces instead of one redesign:
   principle. Needed one real gap closed first: `GET /games/current-week`
   (`backend/lib/current-week.js`), since nothing before this had a
   reusable way to resolve "this week" without the user typing a
-  season/week — Games/Rankings/Edge/Portfolio still all require manual
-  entry, unchanged by this.
-
-Genuinely still open: Games/Rankings/Edge/Portfolio's own season/week
-inputs could now default off `GET /games/current-week` the same way Board
-does, instead of requiring manual entry or defaulting to a hardcoded
-"week 1" — not done here, scoped narrowly to the Board page itself.
+  season/week.
+- **Season/week defaulting on Games/Rankings/Edge/Portfolio — done,
+  2026-09-14** (commit `3a9d290`, same day as Board). All four pages now
+  seed off `GET /games/current-week` via a shared `useCurrentWeek` hook
+  (`frontend/src/hooks/useCurrentWeek.js`) instead of requiring manual
+  entry or defaulting to a hardcoded "week 1" — the user can still
+  change either. This closes what the note below used to flag as still
+  open right after Board shipped; kept here as a corrected record rather
+  than silently deleted, since the original note briefly described real
+  (now-stale) state.
+- **Nav/IA cleanup — done, 2026-09-15.** With the game deep dive, Board,
+  and current-week defaulting all shipped, the one concrete redesign gap
+  left was the header itself: `Layout.jsx`'s nav had grown to 10 flat
+  top-level `NavLink`s in a single row (Board, Games, Teams, Players,
+  Picks, Leaderboard, Rankings, Edge, Portfolio, Chat) with no wrap or
+  responsive handling — crowded even at desktop widths. Grouped the 9
+  non-Board routes into 3 clusters behind a new `NavGroup.jsx` dropdown
+  component: Research (Games/Teams/Players), Agents
+  (Rankings/Edge/Portfolio/Chat), Record (Picks/Leaderboard) — Board
+  stays standalone as the app's own front door. A group's trigger keeps
+  the same active-pill styling as a plain link whenever the current
+  route matches one of its items, so the user doesn't lose their place
+  in the nav just because a route got nested one level deeper. This is
+  the redesign work Phase 3 was left open for — closing the phase here.
 
 ---
 
