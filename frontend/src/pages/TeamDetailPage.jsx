@@ -2,10 +2,14 @@ import { Link, useParams } from 'react-router-dom';
 import { useApiFetch } from '../hooks/useApiFetch';
 import AsyncState from '../components/AsyncState';
 import { POSITION_GROUP_ORDER, POSITION_GROUP_LABEL } from '../constants/positionGroups';
-import { statusBadgeClass, statusLabel } from '../constants/playerStatus';
 
 // Phase 4 screen 3 / Phase 5 Feature 1 — wired to real data via
 // GET /teams/:id (team + current roster).
+//
+// Roster is active (status='ACT') + injured reserve (status='RES') as of
+// 2026-09-15 (backend/routes/teams.js) -- an IR badge below flags which
+// rows are the latter, since the other roster_status codes (CUT/DEV/
+// RET/EXE) never reach this page at all.
 
 export default function TeamDetailPage() {
   const { teamId } = useParams();
@@ -63,13 +67,9 @@ export default function TeamDetailPage() {
                         <span className="text-ink">{player.full_name}</span>
                         <span className="flex items-center gap-2">
                           <span className="text-xs text-ink-faint">{player.position}</span>
-                          {player.status !== 'active' && (
-                            <span
-                              className={`text-xs font-medium rounded px-1.5 py-0.5 ${statusBadgeClass(
-                                player.status
-                              )}`}
-                            >
-                              {statusLabel(player.status)}
+                          {player.status === 'RES' && (
+                            <span className="text-xs font-medium rounded px-1.5 py-0.5 text-caution bg-caution/12">
+                              IR
                             </span>
                           )}
                         </span>

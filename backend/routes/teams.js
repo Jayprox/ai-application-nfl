@@ -42,10 +42,20 @@ router.get('/:id', async (req, res) => {
     );
     if (!teamRows[0]) return res.status(404).json({ error: 'team not found' });
 
+    // Active roster + injured reserve (2026-09-15, extended same day) —
+    // `status` uses uppercase codes (ACT/CUT/DEV/RES/INA/RET/EXE, per
+    // scripts/fantasy-auction-values.js's ROSTER_STATUS_LABEL). 'ACT' is
+    // the same "actually on the 53" filter matchup-score.js's own
+    // getEligiblePlayers() already uses (see that file's header comment).
+    // 'RES' (this data model's only reserve/IR bucket -- no separate
+    // PUP/NFI split) is included too: a player who just landed on IR is
+    // still part of the team, just not active for game day, so still
+    // belongs here -- unlike CUT/DEV/RET/EXE, which mean they're off the
+    // team's current picture entirely.
     const { rows: roster } = await query(
       `SELECT player_id, full_name, position, position_group, status
        FROM players
-       WHERE current_team_id = $1
+       WHERE current_team_id = $1 AND status IN ('ACT', 'RES')
        ORDER BY position_group, full_name`,
       [teamId]
     );
