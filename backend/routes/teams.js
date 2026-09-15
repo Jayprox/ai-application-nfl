@@ -52,10 +52,24 @@ router.get('/:id', async (req, res) => {
     // still part of the team, just not active for game day, so still
     // belongs here -- unlike CUT/DEV/RET/EXE, which mean they're off the
     // team's current picture entirely.
+    //
+    // updated_at freshness guard (2026-09-15): scripts/backfill-historical.js
+    // seeded players from 2021-2025 roster files, and worker/ingestion-
+    // worker.js's sync_roster job only UPDATEs players present in the
+    // *current* season's roster file -- so a player whose last real season
+    // was several years ago could in principle still carry a stale ACT/RES
+    // status forever. sync_roster now also clears current_team_id for
+    // anyone who drops out of a current-season fetch entirely (see that
+    // job's own comment), so this filter is belt-and-suspenders, not the
+    // primary fix -- but it means a team page never shows a player sync_roster
+    // hasn't actually confirmed in the last couple of days, even if some
+    // future code path ever sets current_team_id without going through
+    // that job.
     const { rows: roster } = await query(
       `SELECT player_id, full_name, position, position_group, status
        FROM players
        WHERE current_team_id = $1 AND status IN ('ACT', 'RES')
+         AND updated_at > now() - interval '2 days'
        ORDER BY position_group, full_name`,
       [teamId]
     );

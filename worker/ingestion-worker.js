@@ -336,6 +336,7 @@ async function syncRoster() {
   const teamIdByAbbr = await loadTeamMaps();
   const cache = new Map();
   let processed = 0;
+  const touchedIds = [];
 
   for (const row of rows) {
     if (!row.gsis_id) continue;
@@ -344,18 +345,57 @@ async function syncRoster() {
 
     const playerId = await resolveIdentity('nflverse', row.gsis_id, { fullName, position: row.position, teamId }, cache);
 
+    // updated_at is stamped here (2026-09-15) so it doubles as a freshness
+    // signal: routes/teams.js's roster query uses it to distinguish
+    // players this job actually confirmed today from players who only
+    // exist because scripts/backfill-historical.js inserted their
+    // 2021-2025 season row once and nothing has touched them since (see
+    // the correction pass below for why that second case needs its own
+    // fix, not just a fresher timestamp).
     await pool.query(
       `UPDATE players
        SET current_team_id = $2, status = $3, position = COALESCE($4, position),
-           position_group = COALESCE($5, position_group)
+           position_group = COALESCE($5, position_group), updated_at = now()
        WHERE player_id = $1`,
       [playerId, teamId, row.status || 'active', row.position || null, row.position ? positionGroupFor(row.position) : null]
     );
     processed++;
+    touchedIds.push(playerId);
   }
 
   console.log(`[job:sync_roster] season ${season}: ${processed} players synced`);
-  return { recordsProcessed: processed };
+
+  // Correction pass, added 2026-09-15: backfill-historical.js seeded
+  // players from every 2021-2025 roster file, stamping each with
+  // whatever team/status they had in the *first* season the backfill
+  // encountered them. Anyone who has since left the league entirely
+  // (retired, out of football) never reappears in a *current*-season
+  // roster file, so the UPDATE above never reaches them — they stayed
+  // permanently attached to a years-old team/status. nflverse's current-
+  // season roster file is the full season roster (including players cut
+  // or moved to IR this season, not just today's 53-man), so any player
+  // still genuinely part of this franchise this season IS in `rows` and
+  // was just touched above; anyone with a current_team_id who was NOT
+  // touched this run is, by definition, not on this season's roster
+  // anywhere, and is now cleared. `processed` is sanity-checked first —
+  // a short/partial CSV fetch must never be allowed to wipe every team's
+  // roster.
+  let corrected = 0;
+  if (processed >= 1000) {
+    const { rowCount } = await pool.query(
+      `UPDATE players
+       SET current_team_id = NULL, status = 'CUT', updated_at = now()
+       WHERE current_team_id IS NOT NULL
+         AND NOT (player_id = ANY($1::uuid[]))`,
+      [touchedIds]
+    );
+    corrected = rowCount;
+    console.log(`[job:sync_roster] season ${season}: cleared ${corrected} players not on any current-season roster (stale historical/backfill rows)`);
+  } else {
+    console.warn(`[job:sync_roster] season ${season}: only ${processed} players processed, skipping stale-player correction pass (sanity floor is 1000) to avoid wiping rosters on a bad fetch`);
+  }
+
+  return { recordsProcessed: processed, playersCorrected: corrected };
 }
 
 async function syncSchedule() {
