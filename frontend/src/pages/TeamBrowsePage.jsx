@@ -24,7 +24,7 @@ export default function TeamBrowsePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-4">Teams</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-4">Teams</h1>
 
       {teams.length === 0 ? (
         <p className="text-sm text-ink-dim">No teams found.</p>

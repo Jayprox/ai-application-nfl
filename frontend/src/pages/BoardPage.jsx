@@ -44,16 +44,27 @@ import EdgeBadge from '../components/EdgeBadge';
  * a second GET /teams call purely to resolve them — EdgePage.jsx needs
  * that extra call because it isn't already fetching a matching games
  * list; this page is.
+ *
+ * Visual design pass (2026-09-15, docs/part2-roadmap.md Phase 4): Board
+ * is the app's front door, so it gets the most hero treatment — Portfolio
+ * Record moved up directly under the title (the app's actual track
+ * record is the single most "does this app work" number, worth more
+ * visual weight than the 4th spot at the bottom), Top Edges/Rankings
+ * Leaders paired into one row on wide screens instead of stacking the
+ * whole page vertically, and the games grid picks up a 3rd column at lg
+ * width. No fetch/data logic changed — presentational only.
  */
 
 const GAMES_PREVIEW_LIMIT = 6;
 const TOP_EDGES_LIMIT = 5;
 
-function StatTile({ label, value }) {
+function StatTile({ label, value, accent = false }) {
   return (
-    <div className="rounded-md border border-line bg-surface px-3 py-2 text-center">
-      <div className="text-lg font-semibold text-ink">{value}</div>
-      <div className="text-xs text-ink-dim">{label}</div>
+    <div className="rounded-md border border-line bg-surface px-3 py-3 text-center">
+      <div className={`font-display text-2xl font-semibold tabular-nums ${accent ? 'text-accent' : 'text-ink'}`}>
+        {value}
+      </div>
+      <div className="mt-1 text-[11px] font-medium uppercase tracking-wide text-ink-faint">{label}</div>
     </div>
   );
 }
@@ -159,7 +170,7 @@ export default function BoardPage() {
   if (!hasWeek) {
     return (
       <div>
-        <h1 className="text-xl font-semibold text-ink mb-1">Board</h1>
+        <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Board</h1>
         <p className="text-sm text-ink-dim">
           No games in the schedule yet — once sync_schedule has run, this page will show this week's slate, top
           edges, and rankings leaders here.
@@ -170,14 +181,35 @@ export default function BoardPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold text-ink mb-1">Board</h1>
-        <p className="text-sm text-ink-dim">
-          Season {season}, Week {week} at a glance — this week's games, the edge agent's top disagreements, this
-          week's rankings leaders, and the portfolio agent's live record. Click through anywhere for the full page
-          behind it.
+      <div className="mb-8 border-b border-line pb-6">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-accent">
+          Season {season} &middot; Week {week}
+        </p>
+        <h1 className="font-display text-3xl font-semibold uppercase tracking-wide text-ink mb-2">Board</h1>
+        <p className="max-w-2xl text-sm text-ink-dim">
+          This week's games, the edge agent's top disagreements, this week's rankings leaders, and the portfolio
+          agent's live record — click through anywhere for the full page behind it.
         </p>
       </div>
+
+      <section className="mb-8">
+        <SectionHeader title="Portfolio Record" linkTo="/picks" linkLabel="Pick history" />
+        {statsLoading || statsError ? (
+          <AsyncState loading={statsLoading} error={statsError} loadingLabel="Loading record…" onRetry={refetchStats} />
+        ) : !record || record.total === 0 ? (
+          <p className="text-sm text-ink-dim">No picks logged yet.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile
+              label="Record"
+              value={`${record.correct}-${record.incorrect}${record.push ? `-${record.push}` : ''}`}
+            />
+            <StatTile label="Hit rate" value={record.hit_rate_pct !== null ? `${record.hit_rate_pct}%` : '—'} accent />
+            <StatTile label="Pending" value={record.pending} />
+            <StatTile label="Total" value={record.total} />
+          </div>
+        )}
+      </section>
 
       <div className="space-y-8">
         <section>
@@ -188,7 +220,7 @@ export default function BoardPage() {
             <p className="text-sm text-ink-dim">No games scheduled for week {week} yet.</p>
           ) : (
             <>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {previewGames.map((game) => (
                   <GameCard key={game.game_id} game={game} edge={edgeByGameId.get(game.game_id)} />
                 ))}
@@ -202,81 +234,64 @@ export default function BoardPage() {
           )}
         </section>
 
-        <section>
-          <SectionHeader title="Top Edges" linkTo="/edge" linkLabel="All edges" />
-          {edgeLoading || edgeError ? (
-            <AsyncState loading={edgeLoading} error={edgeError} loadingLabel="Loading edges…" onRetry={refetchEdge} />
-          ) : edges.length === 0 ? (
-            <p className="text-sm text-ink-dim">No model-vs-market disagreements found for this week.</p>
-          ) : (
-            <ul className="space-y-2">
-              {edges.slice(0, TOP_EDGES_LIMIT).map((row) => {
-                const g = gamesById.get(row.game_id);
-                const label = g ? `${g.away_team_abbr} @ ${g.home_team_abbr}` : `Game ${row.game_id}`;
-                return (
-                  <li
-                    key={row.game_id}
-                    className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface px-4 py-2.5"
-                  >
-                    <Link to={`/games/${row.game_id}`} className="text-sm font-medium text-link hover:underline">
-                      {label}
-                    </Link>
-                    <EdgeBadge edge={row.edge} />
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        <div className="grid gap-8 lg:grid-cols-2">
+          <section>
+            <SectionHeader title="Top Edges" linkTo="/edge" linkLabel="All edges" />
+            {edgeLoading || edgeError ? (
+              <AsyncState loading={edgeLoading} error={edgeError} loadingLabel="Loading edges…" onRetry={refetchEdge} />
+            ) : edges.length === 0 ? (
+              <p className="text-sm text-ink-dim">No model-vs-market disagreements found for this week.</p>
+            ) : (
+              <ul className="space-y-2">
+                {edges.slice(0, TOP_EDGES_LIMIT).map((row) => {
+                  const g = gamesById.get(row.game_id);
+                  const label = g ? `${g.away_team_abbr} @ ${g.home_team_abbr}` : `Game ${row.game_id}`;
+                  return (
+                    <li
+                      key={row.game_id}
+                      className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface px-4 py-2.5"
+                    >
+                      <Link to={`/games/${row.game_id}`} className="text-sm font-medium text-link hover:underline">
+                        {label}
+                      </Link>
+                      <EdgeBadge edge={row.edge} />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
-        <section>
-          <SectionHeader title="Rankings Leaders" linkTo="/rankings" linkLabel="Full rankings" />
-          <p className="text-xs text-ink-dim mb-2">Passing yards — top matchup scores this week.</p>
-          {rankingsLoading || rankingsError ? (
-            <AsyncState
-              loading={rankingsLoading}
-              error={rankingsError}
-              loadingLabel="Loading rankings…"
-              onRetry={refetchRankings}
-            />
-          ) : rankings.length === 0 ? (
-            <p className="text-sm text-ink-dim">No rankings computed yet for this week.</p>
-          ) : (
-            <ul className="space-y-1">
-              {rankings.map((row) => (
-                <li
-                  key={`${row.player_id}-${row.game_id}`}
-                  className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
-                >
-                  <span className="text-ink-faint font-semibold w-5">{row.rank}</span>
-                  <Link to={`/players/${row.player_id}`} className="flex-1 text-ink hover:underline">
-                    {row.player_name} <span className="text-xs text-ink-faint">{row.position}</span>
-                  </Link>
-                  <span className="text-ink-dim tabular-nums">{Number(row.score).toFixed(1)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        <section>
-          <SectionHeader title="Portfolio Record" linkTo="/picks" linkLabel="Pick history" />
-          {statsLoading || statsError ? (
-            <AsyncState loading={statsLoading} error={statsError} loadingLabel="Loading record…" onRetry={refetchStats} />
-          ) : !record || record.total === 0 ? (
-            <p className="text-sm text-ink-dim">No picks logged yet.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <StatTile
-                label="Record"
-                value={`${record.correct}-${record.incorrect}${record.push ? `-${record.push}` : ''}`}
+          <section>
+            <SectionHeader title="Rankings Leaders" linkTo="/rankings" linkLabel="Full rankings" />
+            <p className="text-xs text-ink-dim mb-2">Passing yards — top matchup scores this week.</p>
+            {rankingsLoading || rankingsError ? (
+              <AsyncState
+                loading={rankingsLoading}
+                error={rankingsError}
+                loadingLabel="Loading rankings…"
+                onRetry={refetchRankings}
               />
-              <StatTile label="Hit rate" value={record.hit_rate_pct !== null ? `${record.hit_rate_pct}%` : '—'} />
-              <StatTile label="Pending" value={record.pending} />
-              <StatTile label="Total" value={record.total} />
-            </div>
-          )}
-        </section>
+            ) : rankings.length === 0 ? (
+              <p className="text-sm text-ink-dim">No rankings computed yet for this week.</p>
+            ) : (
+              <ul className="space-y-1">
+                {rankings.map((row) => (
+                  <li
+                    key={`${row.player_id}-${row.game_id}`}
+                    className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
+                  >
+                    <span className="text-ink-faint font-semibold w-5">{row.rank}</span>
+                    <Link to={`/players/${row.player_id}`} className="flex-1 text-ink hover:underline">
+                      {row.player_name} <span className="text-xs text-ink-faint">{row.position}</span>
+                    </Link>
+                    <span className="text-ink-dim tabular-nums">{Number(row.score).toFixed(1)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
     </div>
   );

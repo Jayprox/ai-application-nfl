@@ -33,7 +33,7 @@ export default function TeamDetailPage() {
 
       <div className="mt-2 mb-6 flex items-baseline justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink">{team.name}</h1>
+          <h1 className="font-display text-3xl font-semibold uppercase tracking-wide text-ink">{team.name}</h1>
           <p className="text-sm text-ink-dim">
             {team.conference} {team.division} &middot; {team.stadium_name}, {team.city}, {team.state}
             {team.roof && team.roof !== 'outdoors' ? ` (${team.roof})` : ''}

@@ -91,7 +91,7 @@ export default function GamesPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-1">Games</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Games</h1>
       <p className="text-sm text-ink-dim mb-4">
         This week's schedule at a glance — score and status when known, plus a flag when the edge agent's
         model-vs-market read disagrees. Click a team to dig into the research behind it.

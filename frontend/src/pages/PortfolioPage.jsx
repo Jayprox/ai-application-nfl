@@ -98,7 +98,7 @@ export default function PortfolioPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-1">Portfolio</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Portfolio</h1>
       <p className="text-sm text-ink-dim mb-4">
         Builds a slate of game-line picks from the edge agent's strongest disagreements, sized flat by unit — a
         distinct concern from "which picks are good" (that's Edge). Preview costs nothing and logs nothing; Build

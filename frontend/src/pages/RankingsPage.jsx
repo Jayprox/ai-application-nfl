@@ -113,7 +113,7 @@ export default function RankingsPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-1">Rankings</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Rankings</h1>
       <p className="text-sm text-ink-dim mb-4">
         Top matchup scores for one stat category — the ranking agent's read on which players have the most
         favorable spot this week, purely from matchup/form/situational/role-trend signal, no market data involved.

@@ -45,7 +45,7 @@ export default function PlayerBrowsePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-4">Players</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-4">Players</h1>
 
       <div className="flex flex-wrap gap-2 mb-4">
         <input

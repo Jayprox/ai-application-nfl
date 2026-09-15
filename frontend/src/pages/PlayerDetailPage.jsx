@@ -115,7 +115,7 @@ export default function PlayerDetailPage() {
       </div>
 
       <div className="mt-2 mb-6">
-        <h1 className="text-xl font-semibold text-ink">{player.full_name}</h1>
+        <h1 className="font-display text-3xl font-semibold uppercase tracking-wide text-ink">{player.full_name}</h1>
         <p className="text-sm text-ink-dim">
           {player.position} {player.team_name ? `· ${player.team_name}` : '· Free agent'}
         </p>

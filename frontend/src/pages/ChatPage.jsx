@@ -178,7 +178,7 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 8rem)' }}>
-      <h1 className="text-xl font-semibold text-ink mb-1">Chat</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Chat</h1>
       <p className="text-sm text-ink-dim mb-4">
         The research assistant — calls the same rankings, edge, insights, picks, and leaderboard data as the other
         tabs, answers only from what those return.

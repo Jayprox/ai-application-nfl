@@ -74,7 +74,7 @@ export default function EdgePage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-1">Edge</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Edge</h1>
       <p className="text-sm text-ink-dim mb-4">
         The edge agent's read on each game — which side the model's offensive-skill matchup scores lean toward,
         versus which side the sportsbook actually favors. A disagreement isn't a pick, just worth a second look.

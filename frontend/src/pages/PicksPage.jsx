@@ -111,7 +111,7 @@ export default function PicksPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-ink mb-1">Picks</h1>
+      <h1 className="font-display text-2xl font-semibold uppercase tracking-wide text-ink mb-1">Picks</h1>
       <p className="text-sm text-ink-dim mb-4">Portfolio agent — every pick it's logged, and how it's graded out.</p>
 
       {record && (

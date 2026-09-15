@@ -185,6 +185,30 @@ in two pieces instead of one redesign:
 
 ---
 
+## Part 2, Phase 4 — Visual design pass
+
+**In progress, started 2026-09-15.** Phase 3 closed out the information
+architecture (deep dive, Board, current-week defaulting, nav grouping);
+this phase is about how it all looks, not what it shows. First round:
+
+- **Typography system.** The app ran on the browser-default sans stack
+  through Phase 3 — no font pairing was ever chosen. Added Oswald (a
+  condensed, high-contrast "scoreboard" voice) for page titles, the brand
+  wordmark, and Board's hero stat numerals, paired with Inter for body
+  and data text everywhere else — `--font-display`/`--font-sans` tokens
+  in `frontend/src/index.css`, loaded via a Google Fonts link in
+  `frontend/index.html`. Applied consistently to every page's `<h1>`
+  (uppercase, tracking-wide) rather than only on Board, since a one-off
+  font change on a single page would clash with the header/nav right
+  next to it instead of reading as a real system.
+- **Board hero.** Portfolio Record — the app's actual track record —
+  moved up directly under the title instead of sitting as the 4th
+  stacked section; Top Edges and Rankings Leaders now sit side by side
+  on wide screens instead of stacking the whole page vertically. No
+  fetch/data logic changed, presentational only.
+
+---
+
 ## Open decisions — resolved
 
 Both items this roadmap originally left open are now settled by what
