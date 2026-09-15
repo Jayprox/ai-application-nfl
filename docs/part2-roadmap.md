@@ -287,4 +287,54 @@ actually shipped:
   one bad/unexpected value only costs that one row instead of aborting
   every row queued after it in the batch, and instead of burning all 5
   retries on the same doomed full-batch re-attempt.
+- **General QA / review pass — done, 2026-09-15.** Three parallel
+  read-only reviews across backend, worker, and frontend surfaced 8
+  findings; all 8 fixed same day. Worst first:
+  1. **CRITICAL, worker:** `syncSchedule()` built `game_datetime` (a
+     TIMESTAMPTZ column) as a naive `${gameday}T${gametime}:00` string
+     with no UTC offset, even though nflverse's `gametime` is Eastern
+     Time — every stored kickoff was off by 4-5 hours (DST-dependent),
+     corrupting live-window detection, weather/odds proximity buckets,
+     and any displayed kickoff time. Fixed with a new
+     `easternToUtcIso()`/`easternOffsetForDate()` pair that resolves
+     ET's real UTC offset per-date via `Intl`'s IANA tz data and builds
+     an offset-bearing ISO string instead.
+  2. **HIGH, worker:** that same function's upsert overwrote
+     `home_score`/`away_score`/`status` unconditionally from nflverse's
+     (lagging) schedule CSV, with no guard against downgrading an
+     already-live/final game — unlike `sync_live_scores`'s own upsert,
+     which already guards with `WHERE status <> 'final'`. Fixed with a
+     `CASE WHEN games.status = 'final' THEN ... ELSE EXCLUDED. ... END`
+     per column.
+  3. **HIGH, worker:** `runJob()`/`scheduleRetry()` called
+     `logRunStart()` *before* their own try/catch, so a transient DB
+     error on that one call became an unhandled promise rejection with
+     no `.catch` anywhere upstream and no process-level handler — Node
+     treats that as fatal since v15. Fixed by moving `logRunStart` and
+     the failure-logging call inside the try/catch, guarded so nothing
+     in the path can throw uncaught.
+  4. **MEDIUM, worker:** `findHighlightlyMatch`'s cache-poisoning guard
+     required only ONE of its 3 date-candidate lookups to succeed before
+     caching a permanent "no match" — so a transient failure on the real
+     kickoff-date candidate plus a genuine zero-result success on an
+     adjacent day cached "no match" forever without the real date ever
+     being checked. Fixed to require all 3 to succeed (matches what the
+     function's own doc comment already specified).
+  5. **LOW, backend:** `computeAndStoreMatchupScores()`'s per-player
+     batch loop had no error isolation — same failure class as the
+     `sync_odds` bug above — so one player's transient error aborted
+     every remaining player for the day. Fixed with a per-player
+     try/catch and an `errored` counter.
+  6. **LOW, backend:** `rankings.js` and `matchup-scores.js` didn't
+     validate a negative `limit` query param, so `limit=-5` reached
+     Postgres as a negative `LIMIT` and 500'd instead of a clean 400.
+     Fixed with the same regex-based validation already used for
+     `week`.
+  7. **MODERATE, frontend:** `LoginPage.jsx` and `NotFoundPage.jsx`
+     still defaulted/linked to `/teams`, which stopped being the app's
+     index route when `/board` took over earlier this session. Fixed.
+  8. **MINOR, frontend:** several filter/search inputs across
+     `GamesPage`, `EdgePage`, `RankingsPage`, `PortfolioPage`,
+     `PlayerBrowsePage`, and `ChatPage` were placeholder-only with no
+     accessible name. Fixed with `aria-label` on each.
 - Phase 3 (frontend redesign) — scope and timing not yet decided.

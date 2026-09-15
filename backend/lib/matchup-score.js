@@ -139,35 +139,51 @@ async function computeAndStoreMatchupScores(season) {
   const players = await getEligiblePlayers();
   let written = 0;
   let skipped = 0;
+  let errored = 0;
 
   async function processPlayer(player) {
-    const gameId = await getNextGameForTeam(player.current_team_id);
-    if (!gameId) { skipped++; return; } // defensive — shouldn't happen given the EXISTS filter above
+    // CONFIRMED bug, 2026-09-15: this whole body used to run unguarded —
+    // same failure class as sync_odds's old unguarded insert loop (see
+    // worker/ingestion-worker.js). One player's transient error (a
+    // dropped DB connection, an unexpected null somewhere in
+    // computePlayerInsights) rejected this call, which rejects the
+    // Promise.all(batch.map(processPlayer)) below it, which throws out of
+    // the `await` in the for-loop and aborts every remaining batch for
+    // the rest of the day's run — not just this one player. A per-player
+    // try/catch means one bad player only costs that one player's score
+    // for today.
+    try {
+      const gameId = await getNextGameForTeam(player.current_team_id);
+      if (!gameId) { skipped++; return; } // defensive — shouldn't happen given the EXISTS filter above
 
-    const result = await computePlayerInsights(player.player_id, season);
-    const blended = result ? blendScore(result.insights) : null;
-    if (!blended) { skipped++; return; }
+      const result = await computePlayerInsights(player.player_id, season);
+      const blended = result ? blendScore(result.insights) : null;
+      if (!blended) { skipped++; return; }
 
-    // recent_form already computes this player's own season-average
-    // production as part of its own trend read (insights.js) — reused
-    // here purely for display (Rankings' "season avg" column next to the
-    // trend score), not part of the blend itself. Null when the player
-    // has 0 games played this season.
-    const recentForm = result.insights.find((i) => i.category === 'recent_form');
-    const gamesPlayed = recentForm?.gamesPlayed ?? null;
-    const seasonAvg = recentForm?.seasonAvg ?? null;
+      // recent_form already computes this player's own season-average
+      // production as part of its own trend read (insights.js) — reused
+      // here purely for display (Rankings' "season avg" column next to the
+      // trend score), not part of the blend itself. Null when the player
+      // has 0 games played this season.
+      const recentForm = result.insights.find((i) => i.category === 'recent_form');
+      const gamesPlayed = recentForm?.gamesPlayed ?? null;
+      const seasonAvg = recentForm?.seasonAvg ?? null;
 
-    await query(
-      `INSERT INTO matchup_scores (player_id, game_id, season, score, categories_used, breakdown, games_played, season_avg, computed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-       ON CONFLICT (player_id, game_id) DO UPDATE SET
-         season = EXCLUDED.season,
-         score = EXCLUDED.score, categories_used = EXCLUDED.categories_used,
-         breakdown = EXCLUDED.breakdown, games_played = EXCLUDED.games_played,
-         season_avg = EXCLUDED.season_avg, computed_at = now()`,
-      [player.player_id, gameId, season, blended.score, blended.categoriesUsed, JSON.stringify(blended.breakdown), gamesPlayed, seasonAvg]
-    );
-    written++;
+      await query(
+        `INSERT INTO matchup_scores (player_id, game_id, season, score, categories_used, breakdown, games_played, season_avg, computed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+         ON CONFLICT (player_id, game_id) DO UPDATE SET
+           season = EXCLUDED.season,
+           score = EXCLUDED.score, categories_used = EXCLUDED.categories_used,
+           breakdown = EXCLUDED.breakdown, games_played = EXCLUDED.games_played,
+           season_avg = EXCLUDED.season_avg, computed_at = now()`,
+        [player.player_id, gameId, season, blended.score, blended.categoriesUsed, JSON.stringify(blended.breakdown), gamesPlayed, seasonAvg]
+      );
+      written++;
+    } catch (err) {
+      errored++;
+      console.warn(`[matchup-score] skipping player ${player.player_id}: ${err.message}`);
+    }
   }
 
   // Progress logging so a long run is visibly making progress rather than
@@ -183,7 +199,7 @@ async function computeAndStoreMatchupScores(season) {
     }
   }
 
-  return { written, skipped, eligible: players.length };
+  return { written, skipped, errored, eligible: players.length };
 }
 
 module.exports = { blendScore, computeAndStoreMatchupScores, CATEGORY_WEIGHTS, BASELINE };

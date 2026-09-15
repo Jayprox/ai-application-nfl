@@ -142,6 +142,7 @@ export default function RankingsPage() {
           min="1"
           max="22"
           placeholder="All weeks"
+          aria-label="Week number (optional)"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
           className="w-28 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"

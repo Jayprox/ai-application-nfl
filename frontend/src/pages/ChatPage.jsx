@@ -209,6 +209,7 @@ export default function ChatPage() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="e.g. Who are the top rushing matchups this week?"
+          aria-label="Chat message"
           rows={1}
           className="flex-1 resize-none rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         />

@@ -17,7 +17,7 @@ export default function LoginPage() {
   // Already logged in (e.g. hit /login directly with a valid session) —
   // don't show the form, just continue on.
   if (isAuthenticated) {
-    const redirectTo = location.state?.from ?? '/teams';
+    const redirectTo = location.state?.from ?? '/board';
     return <Navigate to={redirectTo} replace />;
   }
 
@@ -27,7 +27,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(username, password);
-      navigate(location.state?.from ?? '/teams', { replace: true });
+      navigate(location.state?.from ?? '/board', { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {

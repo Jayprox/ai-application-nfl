@@ -69,6 +69,13 @@ router.get('/', async (req, res) => {
   if (week !== undefined && !/^\d{1,2}$/.test(String(week))) {
     return res.status(400).json({ error: 'week must be a 1-2 digit number' });
   }
+  // CONFIRMED bug, 2026-09-15: same issue as rankings.js's limit param —
+  // a negative value survived `Number(limit) || MAX_RESULTS` (nonzero
+  // negatives are truthy) and reached Postgres as a negative LIMIT,
+  // throwing a 500 instead of a clean 400.
+  if (limit !== undefined && !/^\d+$/.test(String(limit))) {
+    return res.status(400).json({ error: 'limit must be a non-negative integer' });
+  }
   const resultLimit = Math.min(MAX_RESULTS, Number(limit) || MAX_RESULTS);
 
   try {

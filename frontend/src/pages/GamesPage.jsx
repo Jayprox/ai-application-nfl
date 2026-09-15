@@ -110,6 +110,7 @@ export default function GamesPage() {
           min="1"
           max="22"
           placeholder="Week"
+          aria-label="Week number"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
           className="w-24 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"

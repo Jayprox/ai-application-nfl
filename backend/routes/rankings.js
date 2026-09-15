@@ -42,6 +42,14 @@ router.get('/', async (req, res) => {
   if (week !== undefined && !/^\d{1,2}$/.test(String(week))) {
     return res.status(400).json({ error: 'week must be a 1-2 digit number' });
   }
+  // CONFIRMED bug, 2026-09-15: a negative limit (e.g. limit=-5) passed
+  // `Number(limit) || DEFAULT_RESULTS` unchanged (a nonzero negative
+  // number is truthy), then Math.min(MAX_RESULTS, -5) kept it negative,
+  // and a negative LIMIT reaching Postgres via rankMatchups() below threw
+  // a 500 instead of a clean 400 on bad input.
+  if (limit !== undefined && !/^\d+$/.test(String(limit))) {
+    return res.status(400).json({ error: 'limit must be a non-negative integer' });
+  }
   const resultLimit = Math.min(MAX_RESULTS, Number(limit) || DEFAULT_RESULTS);
 
   try {

@@ -177,6 +177,43 @@ function classifyWeatherCondition(roof) {
   return null; // see scripts/backfill-historical.js header — genuinely unknown for outdoor games from this source
 }
 
+// CONFIRMED bug, 2026-09-15: syncSchedule() below was building
+// gameDatetime as `${gameday}T${gametime}:00` with no UTC offset --
+// nflverse's `gametime` field is documented as Eastern Time (ET), 24hr
+// clock, but that naive string gets handed straight to pg as a
+// TIMESTAMPTZ value, which Postgres parses as if it were already UTC.
+// Every stored kickoff was off by 4-5 hours (DST-dependent) from the
+// real one, which corrupts every time-sensitive read downstream:
+// isGameWindowActive()'s live-window check, the weather/odds proximity
+// buckets, and any kickoff time the frontend displays. Fixed by
+// resolving ET's actual UTC offset for the given date (it flips between
+// EDT/-04:00 and EST/-05:00 on the second Sunday of March / first Sunday
+// of November) via Intl's IANA tz data, then building an ISO string WITH
+// that explicit offset -- Postgres (and node-postgres, which passes
+// strings through as-is for timestamptz params) parses an offset-bearing
+// ISO string correctly regardless of the server's own timezone setting.
+function easternOffsetForDate(gameday) {
+  // Anchor at noon UTC on the game's calendar date rather than parsing
+  // the actual (still-naive-at-this-point) kickoff instant -- avoids the
+  // date rolling to the previous/next day across the UTC boundary before
+  // we've even resolved the offset that would prevent that.
+  const probe = new Date(`${gameday}T12:00:00Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(probe);
+  const tzName = parts.find((p) => p.type === 'timeZoneName')?.value || 'GMT-5';
+  const match = tzName.match(/GMT([+-]\d+)/);
+  return match ? parseInt(match[1], 10) : -5; // -5 (EST) is the safe fallback if Intl ever can't resolve it
+}
+
+function easternToUtcIso(gameday, gametime) {
+  const offsetHours = easternOffsetForDate(gameday);
+  const sign = offsetHours <= 0 ? '-' : '+';
+  const abs = String(Math.abs(offsetHours)).padStart(2, '0');
+  return `${gameday}T${gametime}:00${sign}${abs}:00`;
+}
+
 const POSITION_GROUP = {
   offense: new Set(['QB', 'RB', 'FB', 'HB', 'WR', 'TE', 'T', 'G', 'C', 'OT', 'OG', 'OL']),
   defense: new Set(['DE', 'DT', 'NT', 'DL', 'LB', 'ILB', 'OLB', 'MLB', 'EDGE', 'CB', 'S', 'SS', 'FS', 'DB', 'SAF', 'NB']),
@@ -346,7 +383,10 @@ async function syncSchedule() {
       const gameType = g.game_type === 'REG' ? 'regular' : g.game_type === 'PRE' ? 'preseason' : 'postseason';
       const gameSlot = classifyGameSlot(g.weekday, g.gametime, g.gameday);
       const weatherCondition = classifyWeatherCondition(g.roof);
-      const gameDatetime = g.gameday && g.gametime ? `${g.gameday}T${g.gametime}:00` : g.gameday ? `${g.gameday}T00:00:00` : null;
+      // CONFIRMED fix, 2026-09-15: was building this as a naive
+      // (no-offset) string, which Postgres parsed as UTC even though
+      // nflverse's gametime is Eastern -- see easternToUtcIso() above.
+      const gameDatetime = g.gameday && g.gametime ? easternToUtcIso(g.gameday, g.gametime) : g.gameday ? easternToUtcIso(g.gameday, '00:00') : null;
       if (!gameDatetime) continue;
 
       const p = values.length * 15;
@@ -373,9 +413,18 @@ async function syncSchedule() {
            weather_condition = EXCLUDED.weather_condition,
            weather_temp_f = EXCLUDED.weather_temp_f,
            weather_wind_mph = EXCLUDED.weather_wind_mph,
-           home_score = EXCLUDED.home_score,
-           away_score = EXCLUDED.away_score,
-           status = EXCLUDED.status`,
+           -- CONFIRMED bug, 2026-09-15: this upsert used to overwrite
+           -- score/status unconditionally from nflverse's schedule CSV,
+           -- which lags real play. sync_live_scores (see below) already
+           -- guards its own score/status write with
+           -- "WHERE status <> 'final'" for exactly this reason; this job
+           -- had no equivalent guard, so a sync_schedule run mid-game
+           -- could silently downgrade a correct live/final score back to
+           -- scheduled/NULL. Once a game is 'final' we trust that over
+           -- whatever the (lagging) schedule feed still says.
+           home_score = CASE WHEN games.status = 'final' THEN games.home_score ELSE EXCLUDED.home_score END,
+           away_score = CASE WHEN games.status = 'final' THEN games.away_score ELSE EXCLUDED.away_score END,
+           status = CASE WHEN games.status = 'final' THEN games.status ELSE EXCLUDED.status END`,
         params
       );
       processed += values.length;
@@ -917,7 +966,21 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache = highlightlyMatch
     return d.toISOString().slice(0, 10);
   });
 
-  let sawSuccessfulResponse = false;
+  // CONFIRMED edge case, 2026-09-15: this used to require only ONE of
+  // the 3 date candidates to succeed before caching a permanent "no
+  // match" -- so a transient failure on the real kickoff-date candidate
+  // (candidate 0, tried first), combined with a genuine zero-result
+  // success on an adjacent +/-1-day candidate, cached this game as "no
+  // match" forever even though the actual kickoff date was never
+  // successfully checked. That didn't match the doc comment above, which
+  // already specifies "a real, successful response with zero results
+  // across all three date candidates" -- fixed to actually require all
+  // three to have returned a real response (zero failures) before
+  // treating "no match" as confirmed. Any failure at all now leaves the
+  // game uncached so a later tick gets a genuine shot at the real date
+  // once whatever caused the failure (quota cooldown, network blip)
+  // clears.
+  let sawFailure = false;
   for (const date of dateCandidates) {
     let payload;
     try {
@@ -926,9 +989,9 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache = highlightlyMatch
       });
     } catch (err) {
       console.warn(`[highlightly] /matches lookup failed for ${awayAbbr}@${homeAbbr} on ${date} (${err.message})`);
+      sawFailure = true;
       continue;
     }
-    sawSuccessfulResponse = true;
     const matches = Array.isArray(payload) ? payload : payload?.data || [];
     if (matches.length) {
       cache.set(game.game_id, matches[0].id);
@@ -937,7 +1000,7 @@ async function findHighlightlyMatch(game, abbrByTeamId, cache = highlightlyMatch
   }
 
   console.warn(`[highlightly] no match found for ${awayAbbr}@${homeAbbr} near ${game.game_datetime}`);
-  if (sawSuccessfulResponse) {
+  if (!sawFailure) {
     cache.set(game.game_id, null);
   }
   return null;
@@ -1997,17 +2060,39 @@ async function isDue(jobType, job, now) {
 // this promise resolves, so the retry silently never runs. The background
 // scheduler (tick() -> runJob(jobType, job), no options) always wants the
 // real retry/backoff behavior, so it keeps the default.
+// CONFIRMED bug, 2026-09-15: `await logRunStart(...)` used to sit ABOVE
+// this function's own try/catch (and above scheduleRetry's inner one),
+// so a transient failure in that one call -- a dropped DB connection
+// during the INSERT itself, not during the job's real work -- threw
+// before entering the try block, and neither call site
+// (tick() -> runJob(), fire-and-forget at its call site, or the CLI
+// one-off path's .then() with no .catch) ever attaches a rejection
+// handler. There's also no process-level 'unhandledRejection' handler in
+// this file. Node treats an unhandled rejection as fatal by default
+// (since v15), so a single bad connection at exactly the wrong moment
+// could take down the entire worker process, not just fail one job run.
+// Fixed by moving logRunStart inside the try, and guarding the
+// failure-logging call too (which does its own DB write and could fail
+// the same way) so nothing in this path can throw uncaught.
 async function runJob(jobType, job, { retry = true } = {}) {
-  const runId = await logRunStart(jobType, job.source);
   lastRunAt[jobType] = new Date();
-
+  let runId;
   try {
+    runId = await logRunStart(jobType, job.source);
     const { recordsProcessed } = await job.run();
     await logRunSuccess(runId, recordsProcessed);
     return { ok: true };
   } catch (err) {
     console.error(`[job:${jobType}] failed:`, err);
-    await logRunFailure(runId, err);
+    if (runId) {
+      try {
+        await logRunFailure(runId, err);
+      } catch (logErr) {
+        console.error(`[job:${jobType}] also failed to record the failure in ingestion_runs:`, logErr);
+      }
+    } else {
+      console.error(`[job:${jobType}] failed before logRunStart could record a run row -- likely a DB connectivity blip`);
+    }
     if (retry) scheduleRetry(jobType, job);
     return { ok: false, err };
   }
@@ -2021,13 +2106,22 @@ function scheduleRetry(jobType, job, attempt = 1) {
   }
   const delayMs = Math.min(2 ** attempt * 1000, 5 * 60 * 1000);
   setTimeout(async () => {
-    const runId = await logRunStart(jobType, job.source);
+    let runId;
     try {
+      runId = await logRunStart(jobType, job.source);
       const { recordsProcessed } = await job.run();
       await logRunSuccess(runId, recordsProcessed);
     } catch (err) {
       console.error(`[job:${jobType}] retry ${attempt} failed:`, err);
-      await logRunFailure(runId, err);
+      if (runId) {
+        try {
+          await logRunFailure(runId, err);
+        } catch (logErr) {
+          console.error(`[job:${jobType}] also failed to record retry ${attempt}'s failure in ingestion_runs:`, logErr);
+        }
+      } else {
+        console.error(`[job:${jobType}] retry ${attempt} failed before logRunStart could record a run row`);
+      }
       scheduleRetry(jobType, job, attempt + 1);
     }
   }, delayMs);

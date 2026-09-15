@@ -118,6 +118,7 @@ export default function PortfolioPage() {
           min="1"
           max="22"
           placeholder="Week"
+          aria-label="Week number"
           value={weekInput}
           onChange={(e) => setWeekInput(e.target.value)}
           className="w-24 rounded-md border border-line px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -127,6 +128,7 @@ export default function PortfolioPage() {
           min="1"
           max="20"
           placeholder="Max picks"
+          aria-label="Maximum number of picks"
           value={maxPicksInput}
           onChange={(e) => setMaxPicksInput(e.target.value)}
           className={numberInputClass}
@@ -136,6 +138,7 @@ export default function PortfolioPage() {
           min="0.01"
           step="0.5"
           placeholder="Unit size"
+          aria-label="Unit size"
           value={unitSizeInput}
           onChange={(e) => setUnitSizeInput(e.target.value)}
           className={numberInputClass}
