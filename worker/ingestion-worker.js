@@ -1501,6 +1501,17 @@ async function syncLiveStats() {
 // Team matching reuses toHighlightlyAbbr()/HIGHLIGHTLY_ABBR_ALIASES
 // (same WAS -> WSH mismatch already confirmed for the injuries/box-score
 // paths) rather than a new lookup table.
+//
+// "Live updates similar to Chalk That MLB" (2026-09-15, docs/part2-
+// roadmap.md): this same match.state object also carries state.period
+// (current quarter) and state.clock (time remaining) right alongside
+// state.score.current above -- no extra Highlightly call, just two more
+// fields off the same response. Written to games.game_period/game_clock
+// (010_live_game_clock.sql) so GameCard/StatusBadge can show "Q2 8:00"
+// instead of a bare "Live" pill. Per Highlightly's own NFL API docs
+// (checked 2026-09-15) but NOT yet confirmed against a real live
+// capture -- same unconfirmed status as report/description above until
+// this actually runs during a live game.
 // ---------------------------------------------------------------------
 
 const unrecognizedLiveScoreReports = new Set();
@@ -1558,6 +1569,13 @@ async function syncLiveScores() {
     if (!parts || parts.length !== 2 || parts.some((n) => Number.isNaN(n))) continue;
     const [homeScore, awayScore] = parts;
 
+    // Same match.state object as the score above -- period/clock are
+    // best-effort: null out anything not shaped as expected rather than
+    // writing a bad value, same "don't fake it" convention as the rest
+    // of this file.
+    const period = Number.isInteger(match.state.period) ? match.state.period : null;
+    const clock = typeof match.state.clock === 'string' && match.state.clock.trim() ? match.state.clock.trim() : null;
+
     const report = (match.state.report || '').trim();
     const isFinal = report.toLowerCase() === 'final';
 
@@ -1573,9 +1591,9 @@ async function syncLiveScores() {
     // finalized — this job is a same-day head start on 'final', not a
     // replacement for that authoritative source.
     const { rowCount } = await pool.query(
-      `UPDATE games SET status = $2, home_score = $3, away_score = $4
+      `UPDATE games SET status = $2, home_score = $3, away_score = $4, game_period = $5, game_clock = $6
        WHERE game_id = $1 AND status <> 'final'`,
-      [game.game_id, isFinal ? 'final' : 'in_progress', homeScore, awayScore]
+      [game.game_id, isFinal ? 'final' : 'in_progress', homeScore, awayScore, period, clock]
     );
     processed += rowCount;
   }

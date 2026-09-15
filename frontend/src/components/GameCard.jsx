@@ -79,7 +79,7 @@ export default function GameCard({ game, edge, odds }) {
               >
                 {game.home_team_abbr}
               </Link>
-              <StatusBadge status={game.status} />
+              <StatusBadge status={game.status} period={game.game_period} clock={game.game_clock} />
             </div>
             <div className="mt-1 text-xs text-ink-dim">
               {formatKickoff(game.game_datetime)}

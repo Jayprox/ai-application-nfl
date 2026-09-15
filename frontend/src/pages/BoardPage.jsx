@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useApiFetch } from '../hooks/useApiFetch';
+import { useApiFetch, LIVE_SCORE_POLL_MS } from '../hooks/useApiFetch';
 import AsyncState from '../components/AsyncState';
 import GameCard from '../components/GameCard';
 import EdgeBadge from '../components/EdgeBadge';
@@ -122,7 +122,15 @@ export default function BoardPage() {
     [hasWeek, season, week]
   );
 
-  const { data: gamesData, error: gamesError, loading: gamesLoading, refetch: refetchGames } = useApiFetch(gamesPath);
+  // Live updates (2026-09-15, docs/part2-roadmap.md): background-poll
+  // this week's games preview while any of them is in_progress, same
+  // ~10-minute cadence as sync_live_scores itself.
+  const [livePollMs, setLivePollMs] = useState(undefined);
+  const { data: gamesData, error: gamesError, loading: gamesLoading, refetch: refetchGames } = useApiFetch(gamesPath, { pollMs: livePollMs });
+  useEffect(() => {
+    const list = gamesData?.data ?? [];
+    setLivePollMs(list.some((g) => g.status === 'in_progress') ? LIVE_SCORE_POLL_MS : undefined);
+  }, [gamesData]);
   const { data: edgeData, error: edgeError, loading: edgeLoading, refetch: refetchEdge } = useApiFetch(edgePath);
   const {
     data: rankingsData,

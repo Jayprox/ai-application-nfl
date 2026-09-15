@@ -13,7 +13,7 @@ import { useAuth } from '../context/AuthContext';
  * @param {string|null} path - null/false skips the fetch entirely (e.g.
  *   waiting on a required param).
  */
-export function useApiFetch(path) {
+export function useApiFetch(path, { pollMs } = {}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(!!path);
@@ -57,11 +57,13 @@ export function useApiFetch(path) {
   const { logout } = useAuth();
   const navigate = useNavigate();
 
-  const refetch = useCallback(async () => {
+  const refetch = useCallback(async ({ silent = false } = {}) => {
     if (!path) return;
     const requestKey = path;
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const result = await apiFetch(path);
       if (latestPathRef.current !== requestKey) return; // superseded by a newer request — ignore this stale response
@@ -75,6 +77,17 @@ export function useApiFetch(path) {
         return;
       }
       if (latestPathRef.current !== requestKey) return;
+      if (silent) {
+        // A background poll failing shouldn't disrupt whatever's already
+        // on screen (same "don't disrupt the primary view over a
+        // transient blip" reasoning InjuryBadge/PlayerInsights already
+        // follow for their own fetch errors) — log it and keep showing
+        // the last good data rather than flipping into an error state
+        // over one missed live-score tick.
+        console.warn('[useApiFetch] silent poll failed:', err.message || err);
+        setLoading(false);
+        return;
+      }
       setFetchedKey(requestKey);
       setError(err.message || 'Something went wrong');
       setLoading(false);
@@ -85,6 +98,20 @@ export function useApiFetch(path) {
     refetch();
   }, [refetch]);
 
+  // Background live polling — opt-in via `pollMs` (callers decide when,
+  // e.g. only while a game is in_progress, rather than this hook polling
+  // unconditionally). Uses the `silent` refetch above so a live
+  // scoreboard's score/clock updates in place without flashing the
+  // page's loading state on every tick. Added 2026-09-15 for "live
+  // updates similar to Chalk That MLB" (docs/part2-roadmap.md).
+  useEffect(() => {
+    if (!pollMs || !path) return undefined;
+    const id = setInterval(() => {
+      refetch({ silent: true });
+    }, pollMs);
+    return () => clearInterval(id);
+  }, [pollMs, path, refetch]);
+
   return {
     data: isStale ? null : data,
     error: isStale ? null : error,
@@ -92,3 +119,9 @@ export function useApiFetch(path) {
     refetch,
   };
 }
+
+// Matches sync_live_scores' own ~10-minute Highlightly polling cadence
+// (worker/ingestion-worker.js) — no point refreshing the browser faster
+// than the backend itself refreshes, and any slower would show a stale
+// score/clock for longer than necessary between real backend updates.
+export const LIVE_SCORE_POLL_MS = 10 * 60 * 1000;

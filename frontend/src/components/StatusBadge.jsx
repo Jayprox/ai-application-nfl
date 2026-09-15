@@ -11,6 +11,15 @@
  * "active state" treatment the scope tabs elsewhere already use for
  * accent, so Live reads as the one thing on a card that's currently
  * happening, not just another descriptive label.
+ *
+ * `period`/`clock` (2026-09-15, "live updates similar to Chalk That
+ * MLB") are optional — sync_live_scores writes games.game_period/
+ * game_clock off the same Highlightly response it already parses for
+ * score/status (010_live_game_clock.sql), and this badge shows "Q2
+ * 8:00" instead of the plain Live pill once both have landed for a
+ * given game. Falls back to Live whenever either is missing (before
+ * that game's first live poll, or if Highlightly's response for it
+ * omitted them) rather than showing a broken "Q undefined".
  */
 
 const STATUS_LABEL = {
@@ -27,11 +36,12 @@ const STATUS_STYLE = {
   postponed: 'text-caution bg-caution/12',
 };
 
-export default function StatusBadge({ status }) {
-  const label = STATUS_LABEL[status] ?? status;
+export default function StatusBadge({ status, period, clock }) {
+  const hasClock = status === 'in_progress' && period != null && clock;
+  const label = hasClock ? `Q${period} ${clock}` : (STATUS_LABEL[status] ?? status);
   const style = STATUS_STYLE[status] ?? 'text-ink-dim bg-surface-2';
   return (
-    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${style}`}>
+    <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-medium ${style}${hasClock ? ' tabular-nums' : ''}`}>
       {label}
     </span>
   );

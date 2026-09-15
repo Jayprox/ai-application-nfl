@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useApiFetch } from '../hooks/useApiFetch';
+import { useEffect, useMemo, useState } from 'react';
+import { useApiFetch, LIVE_SCORE_POLL_MS } from '../hooks/useApiFetch';
 import { useCurrentWeek } from '../hooks/useCurrentWeek';
 import AsyncState from '../components/AsyncState';
 import GameCard from '../components/GameCard';
@@ -66,7 +66,15 @@ export default function GamesPage() {
     return `/odds?${new URLSearchParams({ season: String(season), week }).toString()}`;
   }, [season, week]);
 
-  const { data, error, loading, refetch } = useApiFetch(gamesPath);
+  // Live updates (2026-09-15, docs/part2-roadmap.md): background-poll
+  // this week's schedule while any game on it is in_progress, same
+  // ~10-minute cadence as sync_live_scores itself.
+  const [livePollMs, setLivePollMs] = useState(undefined);
+  const { data, error, loading, refetch } = useApiFetch(gamesPath, { pollMs: livePollMs });
+  useEffect(() => {
+    const list = data?.data ?? [];
+    setLivePollMs(list.some((g) => g.status === 'in_progress') ? LIVE_SCORE_POLL_MS : undefined);
+  }, [data]);
   // Edge and odds are nice-to-have overlays, not the primary fetch this
   // page gates on — a slow/failed /edge or /odds call shouldn't block the
   // schedule itself from rendering, so neither's own loading/error state

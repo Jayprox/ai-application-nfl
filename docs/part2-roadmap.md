@@ -209,6 +209,43 @@ this phase is about how it all looks, not what it shows. First round:
 
 ---
 
+## Part 2, Phase 5 — Live scoreboard updates
+
+**In progress, started 2026-09-15.** Requested as "live updates similar
+to Chalk That MLB" — scoring, stats, time left, quarter. Scoped down to
+the scoreboard first (quarter + clock), same incremental approach the
+earlier live-scoring rollout took (scoreboard status/score before
+touching insights.js) — see "Still genuinely open" above for the
+separate, still-parked question of whether live stats should feed
+recent_form/role_trend.
+
+- **Quarter + clock — done, 2026-09-15.** No new vendor or added
+  Highlightly quota needed: sync_live_scores' existing `/matches` poll
+  (~10-minute cadence, worker/ingestion-worker.js) already receives
+  `state.period`/`state.clock` alongside the score line it was already
+  parsing — this just keeps those two fields instead of discarding them.
+  `010_live_game_clock.sql` adds `games.game_period`/`game_clock`;
+  StatusBadge.jsx shows "Q2 8:00" instead of a plain Live pill once both
+  have landed for a game, falling back to Live otherwise. Per
+  Highlightly's own NFL API docs (checked 2026-09-15) but **not yet
+  confirmed against a real live capture** — same unconfirmed-until-it-
+  actually-runs-live status as `state.report`/`state.description`
+  already carried before this.
+- **Browser-side live refresh — done, 2026-09-15.** GamesPage, Board's
+  games preview, and GameDetailPage now background-poll their own
+  `/games`/`/games/:id` fetch on the same ~10-minute cadence as
+  sync_live_scores itself, but only while a fetched game is actually
+  `in_progress` — a page with no live game on it never starts polling.
+  `useApiFetch.js` grew an opt-in `pollMs` param and a `silent` refetch
+  mode so the score/clock updates in place without flashing the page's
+  loading state on every tick.
+- Deliberately not done this round: a fuller live gamecast view (drive
+  events, top performers, live box score off Highlightly's
+  `/matches/{id}` detail endpoint) — backlogged; each detail call costs
+  its own quota unlike the batched `/matches` list this round reused.
+
+---
+
 ## Open decisions — resolved
 
 Both items this roadmap originally left open are now settled by what

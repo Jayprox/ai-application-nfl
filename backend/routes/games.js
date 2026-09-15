@@ -74,7 +74,7 @@ router.get('/', async (req, res) => {
     const { rows } = await query(
       `SELECT g.game_id, g.season, g.week, g.game_type, g.game_datetime, g.game_slot,
               g.weather_condition, g.weather_temp_f, g.weather_wind_mph,
-              g.home_score, g.away_score, g.status,
+              g.home_score, g.away_score, g.status, g.game_period, g.game_clock,
               ht.team_id AS home_team_id, ht.abbreviation AS home_team_abbr, ht.name AS home_team_name,
               at.team_id AS away_team_id, at.abbreviation AS away_team_abbr, at.name AS away_team_name,
               s.name AS stadium_name, s.city AS stadium_city, s.state AS stadium_state, s.roof AS stadium_roof
@@ -131,7 +131,7 @@ router.get('/:gameId', async (req, res) => {
     const { rows } = await query(
       `SELECT g.game_id, g.season, g.week, g.game_type, g.game_datetime, g.game_slot,
               g.weather_condition, g.weather_temp_f, g.weather_wind_mph,
-              g.home_score, g.away_score, g.status,
+              g.home_score, g.away_score, g.status, g.game_period, g.game_clock,
               ht.team_id AS home_team_id, ht.abbreviation AS home_team_abbr, ht.name AS home_team_name,
               at.team_id AS away_team_id, at.abbreviation AS away_team_abbr, at.name AS away_team_name,
               s.name AS stadium_name, s.city AS stadium_city, s.state AS stadium_state, s.roof AS stadium_roof

@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useApiFetch } from '../hooks/useApiFetch';
+import { useApiFetch, LIVE_SCORE_POLL_MS } from '../hooks/useApiFetch';
 import AsyncState from '../components/AsyncState';
 import StatusBadge from '../components/StatusBadge';
 import WeatherBadge from '../components/WeatherBadge';
@@ -53,7 +54,16 @@ function formatPoint(n) {
 export default function GameDetailPage() {
   const { gameId } = useParams();
 
-  const { data: gameData, error, loading, refetch } = useApiFetch(`/games/${gameId}`);
+  // Live updates (2026-09-15, docs/part2-roadmap.md): background-poll
+  // this game's own fetch while it's in_progress, same ~10-minute
+  // cadence as sync_live_scores itself — see useApiFetch.js's own
+  // comment for why this is a two-step "fetch once, then decide whether
+  // to start polling" rather than an always-on interval.
+  const [livePollMs, setLivePollMs] = useState(undefined);
+  const { data: gameData, error, loading, refetch } = useApiFetch(`/games/${gameId}`, { pollMs: livePollMs });
+  useEffect(() => {
+    setLivePollMs(gameData?.data?.status === 'in_progress' ? LIVE_SCORE_POLL_MS : undefined);
+  }, [gameData]);
   const { data: edgeData } = useApiFetch(`/edge/games/${gameId}`);
   const { data: oddsData } = useApiFetch(`/odds/games/${gameId}`);
   const { data: injuriesData } = useApiFetch(`/games/${gameId}/injuries`);
@@ -108,7 +118,7 @@ export default function GameDetailPage() {
           <Link to={`/teams/${game.home_team_id}`} className="text-xl font-semibold text-link hover:underline">
             {game.home_team_name}
           </Link>
-          <StatusBadge status={game.status} />
+          <StatusBadge status={game.status} period={game.game_period} clock={game.game_clock} />
         </div>
 
         {showScore && (
