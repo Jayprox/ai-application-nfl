@@ -65,11 +65,30 @@ router.get('/:id', async (req, res) => {
     // hasn't actually confirmed in the last couple of days, even if some
     // future code path ever sets current_team_id without going through
     // that job.
+    // Stat-history filter (2026-09-16): the roster used to list every
+    // ACT/RES player regardless of whether they'd ever actually recorded
+    // a game -- correct for team accuracy, but it meant clicking into a
+    // real rookie/practice-squad player who hasn't debuted yet (or any
+    // player who genuinely has zero games across the whole 2021-2026
+    // window the historical backfill + this season cover) landed on a
+    // player-detail page with nothing on it for any of the 6 available
+    // seasons. Requiring at least one row in any of the three per-play
+    // stat tables (offense/defense/special-teams -- the same three
+    // scripts/backfill-historical.js loads and PlayerInsights.jsx reads)
+    // keeps the roster showing only players whose page is actually worth
+    // clicking into. A real player who simply hasn't played their first
+    // game of 2026 yet will start appearing here the moment that first
+    // game is recorded, same as everyone else.
     const { rows: roster } = await query(
       `SELECT player_id, full_name, position, position_group, status
        FROM players
        WHERE current_team_id = $1 AND status IN ('ACT', 'RES')
          AND updated_at > now() - interval '2 days'
+         AND (
+           EXISTS (SELECT 1 FROM player_offense_game_stats pos WHERE pos.player_id = players.player_id)
+           OR EXISTS (SELECT 1 FROM player_defense_game_stats pds WHERE pds.player_id = players.player_id)
+           OR EXISTS (SELECT 1 FROM player_special_teams_game_stats pst WHERE pst.player_id = players.player_id)
+         )
        ORDER BY position_group, full_name`,
       [teamId]
     );
