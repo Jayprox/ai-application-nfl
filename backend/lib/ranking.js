@@ -42,8 +42,43 @@
  * badge already surfaces to the user), then player_id for full
  * determinism so any remaining tie is at least stable across requests
  * rather than arbitrary.
+ *
+ * Relevance filter (2026-09-16): two more usefulness bugs surfaced next
+ * to each other in the same live list —
+ *   1. A signal floor. categories_used in {0,1} means the blend is
+ *      almost entirely BASELINE (50) filler, not a real read — that's
+ *      exactly the "player who hasn't played yet" case (thin/no
+ *      matchup, form, situational, or role-trend data), and it was
+ *      still competing for the top spots on a flat/near-flat score.
+ *      MIN_CATEGORIES_USED excludes those rows outright rather than
+ *      just badging them (RankingsPage.jsx's Signal chip) and hoping
+ *      the user notices before trusting the rank.
+ *   2. A live roster check, done at READ time rather than trusting
+ *      compute time. This table intentionally never deletes old rows
+ *      (see 005_matchup_scores.sql's design note — old scores stay
+ *      queryable for calibration), and matchup-score.js's own eligible-
+ *      players filter (status = 'ACT' AND current_team_id IS NOT NULL)
+ *      only governs what gets WRITTEN on a given day. Confirmed live: a
+ *      players row can transiently pick up a stale 'ACT' status and a
+ *      years-old current_team_id from backfill-historical.js's
+ *      "backfill missing players from historical rosters" step (Step 0,
+ *      inserts using that HISTORICAL season's own roster status/team
+ *      verbatim — real for the season it's from, stale the moment
+ *      sync_roster's next run hasn't yet corrected it back to 'CUT').
+ *      If the daily matchup-scores-cron happens to run inside that
+ *      window, the resulting row is permanent — re-checking status/team
+ *      here means a player who has since been correctly marked 'CUT'
+ *      (Nick Foles being the case that surfaced this: retired years ago,
+ *      still had a live-season matchup_scores row) drops out of the
+ *      list the moment the roster sync catches up, without needing any
+ *      backfill or cleanup of the historical matchup_scores rows
+ *      themselves.
  * =========================================================================
  */
+
+// See "Relevance filter" above — a score built on 0-1 of the 4 trend
+// categories is mostly BASELINE filler, not a real signal.
+const MIN_CATEGORIES_USED = 2;
 
 const { query } = require('../db');
 
@@ -77,6 +112,8 @@ async function rankMatchups({ statCategory, season, week, limit }) {
     params.push(week);
     weekFilter = `AND g.week = $${params.length}`;
   }
+  params.push(MIN_CATEGORIES_USED);
+  const minCategoriesParam = `$${params.length}`;
   params.push(limit);
   const limitParam = `$${params.length}`;
 
@@ -88,6 +125,8 @@ async function rankMatchups({ statCategory, season, week, limit }) {
      JOIN players p ON p.player_id = ms.player_id
      JOIN games g ON g.game_id = ms.game_id
      WHERE ms.season = $1 AND ${positionSql} ${weekFilter}
+       AND ms.categories_used >= ${minCategoriesParam}
+       AND p.status = 'ACT' AND p.current_team_id IS NOT NULL
      ORDER BY ms.score DESC, ms.categories_used DESC, ms.player_id ASC
      LIMIT ${limitParam}`,
     params
