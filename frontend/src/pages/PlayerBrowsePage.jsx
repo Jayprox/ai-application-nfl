@@ -6,7 +6,13 @@ import { POSITION_GROUP_LABEL } from '../constants/positionGroups';
 import { statusBadgeClass, statusLabel } from '../constants/playerStatus';
 
 // Phase 4 screen 4 / Phase 5 Feature 2 — wired to real data via GET
-// /players?name=&team=&position_group=.
+// /players?name=&team=&position_group=&active_only=.
+//
+// "Players active in 2026" checkbox (2026-09-16), on by default — cuts
+// the clutter of free agents/retired/long-cut players cluttering search
+// results, while a single click still finds one when that's genuinely
+// what you're looking for (see routes/players.js's header for the full
+// reasoning and why this is a checkbox rather than a permanent filter).
 
 const selectClass =
   'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
@@ -16,6 +22,7 @@ export default function PlayerBrowsePage() {
   const [name, setName] = useState('');
   const [team, setTeam] = useState('');
   const [positionGroup, setPositionGroup] = useState('');
+  const [activeOnly, setActiveOnly] = useState(true);
 
   // Debounce the free-text name field so we're not firing a request on
   // every keystroke — team/position filters apply immediately since
@@ -30,9 +37,10 @@ export default function PlayerBrowsePage() {
     if (name) params.set('name', name);
     if (team) params.set('team', team);
     if (positionGroup) params.set('position_group', positionGroup);
+    if (activeOnly) params.set('active_only', 'true');
     const qs = params.toString();
     return `/players${qs ? `?${qs}` : ''}`;
-  }, [name, team, positionGroup]);
+  }, [name, team, positionGroup, activeOnly]);
 
   const { data, error, loading, refetch } = useApiFetch(playersPath);
   // Reused just to populate the team filter dropdown with real
@@ -76,12 +84,24 @@ export default function PlayerBrowsePage() {
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-ink-dim">
+          <input
+            type="checkbox"
+            checked={activeOnly}
+            onChange={(e) => setActiveOnly(e.target.checked)}
+            className="rounded border-line accent-accent"
+          />
+          Players active in 2026
+        </label>
       </div>
 
       {loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading players…" onRetry={refetch} />
       ) : players.length === 0 ? (
-        <p className="text-sm text-ink-dim">No players match this search.</p>
+        <p className="text-sm text-ink-dim">
+          No players match this search.
+          {activeOnly ? ' Try unchecking "Players active in 2026" if you\'re looking for a free agent or someone recently cut.' : ''}
+        </p>
       ) : (
         <>
           <ul className="grid gap-1.5 sm:grid-cols-2">

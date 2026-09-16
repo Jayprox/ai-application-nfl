@@ -2,13 +2,30 @@
  * Chalk That NFL — Player routes
  * =========================================================================
  * GET /players       search/list players — ?name=, ?team=(abbreviation),
- *                     ?position_group=offense|defense|special_teams
+ *                     ?position_group=offense|defense|special_teams,
+ *                     ?active_only=true
  * GET /players/:id    one player's identity/bio (current team, position,
  *                      status, draft info). Deliberately does NOT include
  *                      stats here — stats/splits go through POST /query,
  *                      the one shared query engine, rather than this route
  *                      duplicating that logic. Keeps "one query engine,
  *                      multiple callers" (architecture.md §2) honest.
+ *
+ * active_only (2026-09-16): PlayerBrowsePage.jsx's "Players active in
+ * 2026" checkbox, on by default. Same current_team_id/status IN
+ * ('ACT','RES') + 2-day freshness definition routes/teams.js's own
+ * roster query already uses for "on a team's roster right now" — kept
+ * as a checkbox rather than baked in permanently so a free agent or
+ * recently-cut player (e.g. someone worth checking before a potential
+ * re-signing) is still findable by unchecking it, rather than removed
+ * from search entirely. Nothing else reads this param: every
+ * algorithmic path (matchup-score.js, insights.js, ranking.js, edge.js)
+ * queries the players table directly, never through this route, so
+ * scores/insights keep including every player regardless of this
+ * filter. The existing stat-history filter below (added the same day,
+ * before this one) is unaffected either way — a player with zero
+ * recorded games across 2021-2026 has an empty detail page whether or
+ * not they're currently rostered, so that part isn't optional.
  * =========================================================================
  */
 
@@ -20,7 +37,7 @@ const router = express.Router();
 const MAX_RESULTS = 100;
 
 router.get('/', async (req, res) => {
-  const { name, team, position_group } = req.query;
+  const { name, team, position_group, active_only } = req.query;
 
   const conditions = [];
   const params = [];
@@ -39,6 +56,10 @@ router.get('/', async (req, res) => {
     }
     params.push(position_group);
     conditions.push(`p.position_group = $${params.length}`);
+  }
+  // See "active_only" in this file's header comment.
+  if (active_only === 'true') {
+    conditions.push(`p.current_team_id IS NOT NULL AND p.status IN ('ACT', 'RES') AND p.updated_at > now() - interval '2 days'`);
   }
 
   // Stat-history filter (2026-09-16), same reasoning and same three
