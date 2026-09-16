@@ -41,7 +41,20 @@ router.get('/', async (req, res) => {
     conditions.push(`p.position_group = $${params.length}`);
   }
 
-  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  // Stat-history filter (2026-09-16), same reasoning and same three
+  // stat tables as routes/teams.js's roster query: don't surface a
+  // player anywhere browsable in the app if they have zero recorded
+  // games across the whole 2021-2026 window this app tracks -- their
+  // detail page has nothing on it. This is the other browsable listing
+  // besides the team roster (PlayerBrowsePage.jsx's search/filter UI),
+  // so it needs the identical filter or a stat-less player would still
+  // be discoverable here even after dropping off their team's roster.
+  const statHistoryClause = `(
+    EXISTS (SELECT 1 FROM player_offense_game_stats pos WHERE pos.player_id = p.player_id)
+    OR EXISTS (SELECT 1 FROM player_defense_game_stats pds WHERE pds.player_id = p.player_id)
+    OR EXISTS (SELECT 1 FROM player_special_teams_game_stats pst WHERE pst.player_id = p.player_id)
+  )`;
+  const whereClause = `WHERE ${[...conditions, statHistoryClause].join(' AND ')}`;
 
   try {
     const { rows } = await query(
