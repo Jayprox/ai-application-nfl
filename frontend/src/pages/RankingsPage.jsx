@@ -117,9 +117,10 @@ export default function RankingsPage() {
       <p className="text-sm text-ink-dim mb-4">
         Top matchup scores for one stat category — the ranking agent's read on which players have the most
         favorable spot this week, purely from matchup/form/situational/role-trend signal, no market data involved.
-        This is a trend score, not a production ranking, and it only surfaces players on an active roster with
-        at least 2 of the 4 trend categories carrying a real read — check the Signal badge for exactly how many
-        before treating a high score as "this player will put up big numbers."
+        This is a trend score, not a production ranking, and it only surfaces players on an active roster who've
+        actually played this season — a high score can still be built on thin trend data early in the season, so
+        check the Signal badge (how many of the 4 categories had a real read) before treating it as "this player
+        will put up big numbers."
       </p>
 
       <div className="flex flex-wrap gap-2 mb-4">
