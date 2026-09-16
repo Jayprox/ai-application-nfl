@@ -27,11 +27,20 @@ const SCOPES = [
   { value: 'game_log', label: 'Game Log' },
 ];
 
-// Matches the 5 completed seasons the historical backfill loaded
-// (2021-2025) plus the 2026 schedule, which has no stats until the
-// season is actually played — see docs/vibe-coding-checklist.md Phase 5.
+// The 5 completed seasons the historical backfill loaded (2021-2025)
+// plus the 2026 schedule. AVAILABLE_SEASONS[0] used to double as
+// DEFAULT_SEASON's justification for being 2025 instead of 2026: at
+// build time 2026 had no stats yet since the season hadn't started (see
+// docs/vibe-coding-checklist.md Phase 5). That's stale now that games
+// are being played — every other page's season selector (EdgePage,
+// GamesPage, PortfolioPage, RankingsPage) already defaults to the
+// current season, and this page should match rather than open on a
+// year-old default while PlayerInsights.jsx's matchup box right above
+// it is already reading live 2026 data. Deriving DEFAULT_SEASON from
+// AVAILABLE_SEASONS[0] instead of a second hardcoded literal means this
+// can't drift out of sync with it again next season.
 const AVAILABLE_SEASONS = [2026, 2025, 2024, 2023, 2022, 2021];
-const DEFAULT_SEASON = 2025;
+const DEFAULT_SEASON = AVAILABLE_SEASONS[0];
 
 function formatSyncedAt(iso) {
   if (!iso) return 'not yet synced';
