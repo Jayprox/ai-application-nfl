@@ -13,10 +13,19 @@ import GameCard from '../components/GameCard';
  * duplicating another's data. Slice 1b of that phase — Slice 1a was the
  * /games endpoint itself; odds wiring followed once the dark theme shipped.
  *
- * Same season/week selector convention as EdgePage.jsx (required week,
- * two most recent seasons — both game_odds and matchup_scores are
- * populated per-season by their own cron jobs, not backfilled, same
- * reasoning as that page's own header comment).
+ * Season selector (2026-09-16): originally matched EdgePage.jsx's
+ * convention of only the two most recent seasons, reasoning that
+ * game_odds and matchup_scores are populated per-season by their own
+ * cron jobs, not backfilled. That reasoning holds for EdgePage (which
+ * is ONLY a model-vs-market odds view — nothing to show at all without
+ * odds), but this page's primary data, the schedule/score itself, IS
+ * part of the one-time historical backfill back to 2021 (see
+ * PlayerDetailPage.jsx's AVAILABLE_SEASONS for the same 6-year range).
+ * Widened to match: /edge and /odds are already treated as optional
+ * overlays here (see the fetch comment below) that just don't render a
+ * badge when empty, so an older season correctly shows real final
+ * scores with no odds/edge badges, rather than being unreachable from
+ * this picker entirely.
  *
  * Season/week seed from GET /games/current-week on load (useCurrentWeek,
  * added 2026-09-14 alongside BoardPage.jsx) instead of starting blank —
@@ -34,8 +43,7 @@ import GameCard from '../components/GameCard';
  */
 
 const CURRENT_SEASON = 2026;
-const LAST_SEASON = 2025;
-const SEASONS = [CURRENT_SEASON, LAST_SEASON];
+const SEASONS = [2026, 2025, 2024, 2023, 2022, 2021];
 
 const selectClass =
   'rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent';
