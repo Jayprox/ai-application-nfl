@@ -25,6 +25,23 @@
  * position lists are duplicated from insights.js rather than imported
  * (insights.js doesn't export them) but are intentionally kept identical
  * — see insights.js's own file header for the same list.
+ *
+ * Tiebreak fix (2026-09-16): early in a season (or for any thin-signal
+ * category) it's normal for most rows to land on the same score —
+ * matchup-score.js's blend falls back toward a flat default when a
+ * player has little real matchup/form/situational/role-trend read yet
+ * (see this table's own categories_used column). `ORDER BY ms.score DESC`
+ * alone leaves every one of those ties in whatever order Postgres
+ * happens to return them, which is not guaranteed stable across two
+ * queries that differ only in LIMIT — confirmed live: BoardPage.jsx's
+ * `limit=5` widget and RankingsPage.jsx's full (unlimited) table, same
+ * season/week/stat_category otherwise, came back with almost entirely
+ * different top players. Now breaks ties by categories_used DESC first
+ * (a score backed by more real signal outranks an equal score that's
+ * mostly default filler — the same trust signal the page's own Signal
+ * badge already surfaces to the user), then player_id for full
+ * determinism so any remaining tie is at least stable across requests
+ * rather than arbitrary.
  * =========================================================================
  */
 
@@ -71,7 +88,7 @@ async function rankMatchups({ statCategory, season, week, limit }) {
      JOIN players p ON p.player_id = ms.player_id
      JOIN games g ON g.game_id = ms.game_id
      WHERE ms.season = $1 AND ${positionSql} ${weekFilter}
-     ORDER BY ms.score DESC
+     ORDER BY ms.score DESC, ms.categories_used DESC, ms.player_id ASC
      LIMIT ${limitParam}`,
     params
   );
