@@ -30,14 +30,6 @@ import OddsBadge from './OddsBadge';
  * with an inner link that goes somewhere else."
  */
 
-const GAME_SLOT_LABEL = {
-  thursday_night: 'Thursday Night',
-  sunday_early: 'Sunday',
-  sunday_late: 'Sunday',
-  sunday_night: 'Sunday Night',
-  monday_night: 'Monday Night',
-};
-
 // Deliberately renders in the viewer's own browser timezone rather than
 // pinned to ET — decided 2026-09-14, considered and explicitly rejected
 // pinning to ET despite NFL kickoffs usually being talked about that way.
@@ -87,8 +79,11 @@ export default function GameCard({ game, edge, odds }) {
               <StatusBadge status={game.status} period={game.game_period} clock={game.game_clock} />
             </div>
             <div className="mt-1 text-xs text-ink-dim">
+              {/* game_slot (thursday_night/sunday_early/.../monday_night) dropped
+                  2026-09-16 — formatKickoff() below already renders the weekday
+                  ("Thu") and kickoff time ("5:15 PM"), which is strictly more
+                  information than a slot label like "Thursday Night" restates. */}
               {formatKickoff(game.game_datetime)}
-              {GAME_SLOT_LABEL[game.game_slot] ? ` · ${GAME_SLOT_LABEL[game.game_slot]}` : ''}
               {game.stadium_name ? ` · ${game.stadium_name}` : ''}
             </div>
           </div>
