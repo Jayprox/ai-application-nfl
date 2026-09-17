@@ -261,12 +261,37 @@ actually shipped:
 
 ## Still genuinely open
 
+*(Cleaned up 2026-09-17 — this list used to also carry several items
+whose own write-up already said "done"/"fixed"; those moved to
+"Resolved" below so this heading only holds what's actually
+unresolved. See "Backlog" further down for work that was deliberately
+scoped out rather than just unverified.)*
+
 - Watch `sync_live_stats` across more live games to confirm the
   Highlightly stat map holds up broadly (one game's box score is
   confirmed so far).
-- **Confirm the Highlightly quota-cache fix holds up across a full
-  Sunday slate — done, 2026-09-14, and it didn't hold up on the first
-  try.** `findHighlightlyMatch`'s module-scope cache (2026-09-13) and the
+- Whether/how a partial (in-progress) game's live stats should feed
+  `recent_form`/`role_trend` — the original product question behind
+  live-scoring candidate 3 (see "Resolved" below) is still untouched.
+  `insights.js` stays gated to `status='final'`; only the scoreboard
+  (status/score/period/clock) reads live data today.
+- What Highlightly's `state.report`/`state.description` actually say
+  DURING a live game — only a finished game's values ("Final"/
+  "Finished") are confirmed, from a real captured response.
+  `sync_live_scores` logs any other value once
+  (`unrecognizedLiveScoreReports`) and treats it as `in_progress` rather
+  than guessing; needs checking against a real live capture the first
+  time this runs during an actual game.
+
+## Resolved (historical record)
+
+Kept in full rather than deleted, per this doc's own "corrected record,
+not silently dropped" convention — these were previously sitting under
+"Still genuinely open" even though each already documents its own fix.
+
+- **Highlightly quota-cache fix holds up across a full Sunday slate —
+  done, 2026-09-14, and it didn't hold up on the first try.**
+  `findHighlightlyMatch`'s module-scope cache (2026-09-13) and the
   `isDue()` `'game-window'` real-interval fix (2026-09-14 correction: the
   original incident writeup below said `sync_live_stats` polled "every
   20s" — that was never actually true; `isDue()` ignored the job's
@@ -302,19 +327,11 @@ actually shipped:
   existing 429 circuit breaker). `GameCard`/`StatusBadge` show a Live
   pill + running score the same way a final score already renders — no
   schema change needed, `games.status`/`home_score`/`away_score` already
-  supported `'in_progress'`. Deliberately NOT done as part of this:
-    - The product question from candidate 3's original framing below —
-      whether/how a partial game's stats should feed `recent_form`/
-      `role_trend` — is untouched. `insights.js` stays gated to
-      `status='final'`; only the scoreboard reads live data now.
-    - What Highlightly's `state.report`/`state.description` actually say
-      DURING a live game (only a finished game's values — "Final"/
-      "Finished" — are confirmed, from the same real captured response
-      that confirmed `state.score.current`). Any other value is logged
-      once (`unrecognizedLiveScoreReports` in `sync_live_scores`) and
-      treated as `in_progress` rather than guessed — needs checking
-      against a real live capture the first time this runs during an
-      actual game.
+  supported `'in_progress'`. Two things deliberately NOT done as part of
+  this are exactly the two "Still genuinely open" items above (whether
+  live stats should feed `insights.js`, and confirming
+  `state.report`/`state.description` during an actual live game) — not
+  repeated here so they don't drift out of sync again.
     - **`sync_injury_reports`' own Sunday cost — throttled, 2026-09-14.**
       It queries every `status='scheduled'` game within 4 days, and the
       outer job cadence (every 3h on Sundays) was only throttling how
@@ -415,4 +432,28 @@ actually shipped:
      `GamesPage`, `EdgePage`, `RankingsPage`, `PortfolioPage`,
      `PlayerBrowsePage`, and `ChatPage` were placeholder-only with no
      accessible name. Fixed with `aria-label` on each.
-- Phase 3 (frontend redesign) — scope and timing not yet decided.
+
+## Backlog
+
+Work that was explicitly scoped out of the plan rather than just
+not-yet-verified — gathered here (2026-09-17) so it's reviewable as one
+list instead of scattered across Part 1/Part 2 history. The stray line
+that used to sit here ("Phase 3 — scope and timing not yet decided") was
+deleted outright rather than moved: Phase 3 is marked "Status: done"
+above, so that line was simply stale, not a real open item.
+
+- **Natural-language / StatMuse-style search bar.** Scoped out of Part
+  1's MVP on purpose (`docs/vibe-coding-checklist.md`'s Phase 3 backlog)
+  and still only "designed conceptually now, not yet scaffolded in code"
+  (`docs/architecture.md`'s NL query-layer note). Never built.
+- **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+  API, no rework needed later." Not started.
+- **Self-serve signup + email verification.** No signup route exists —
+  accounts are created directly via `scripts/create-test-user.js`; auth
+  is username/password only, and `email` on `users` is stored but
+  optional and unused for login. Backlogged since Part 1.
+- **Fuller live gamecast view** (drive events, top performers, a live box
+  score off Highlightly's `/matches/{id}` detail endpoint) — Phase 5
+  scoped this out on purpose since each detail call costs its own quota,
+  unlike the batched `/matches` list Phase 5 already reuses for the
+  scoreboard.
