@@ -442,18 +442,30 @@ that used to sit here ("Phase 3 — scope and timing not yet decided") was
 deleted outright rather than moved: Phase 3 is marked "Status: done"
 above, so that line was simply stale, not a real open item.
 
-- **Natural-language / StatMuse-style search bar.** Scoped out of Part
-  1's MVP on purpose (`docs/vibe-coding-checklist.md`'s Phase 3 backlog)
-  and still only "designed conceptually now, not yet scaffolded in code"
-  (`docs/architecture.md`'s NL query-layer note). Never built.
-- **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
-  API, no rework needed later." Not started.
-- **Self-serve signup + email verification.** No signup route exists —
-  accounts are created directly via `scripts/create-test-user.js`; auth
-  is username/password only, and `email` on `users` is stored but
-  optional and unused for login. Backlogged since Part 1.
-- **Fuller live gamecast view** (drive events, top performers, a live box
-  score off Highlightly's `/matches/{id}` detail endpoint) — Phase 5
-  scoped this out on purpose since each detail call costs its own quota,
-  unlike the batched `/matches` list Phase 5 already reuses for the
-  scoreboard.
+Ordered 2026-09-17 per explicit priority call:
+
+1. **Natural-language / StatMuse-style search bar.** Scoped out of Part
+   1's MVP on purpose (`docs/vibe-coding-checklist.md`'s Phase 3 backlog)
+   and still only "designed conceptually now, not yet scaffolded in code"
+   (`docs/architecture.md`'s NL query-layer note). Never built. **In
+   progress.**
+2. **Fuller live gamecast view** (drive events, top performers, a live
+   box score off Highlightly's `/matches/{id}` detail endpoint) — Phase 5
+   scoped this out on purpose since each detail call costs its own quota,
+   unlike the batched `/matches` list Phase 5 already reuses for the
+   scoreboard.
+3. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+   API, no rework needed later." Last in line, after the above two are
+   done.
+
+**Scrapped, not backlogged (2026-09-17): self-serve signup + email
+verification.** Checked instead of assumed before dropping it: the
+`users` table has 8 rows today, but 7 are seed/test accounts with no
+email (created 2026-08-25 through 08-30, all script-created — usernames
+like `fastballzoro`/`dryrun_agent` are clearly not organic signups) and
+the 8th is the one real account (`jayprox12`, created 2026-09-15). None
+came through a self-serve flow, because none exists — accounts are still
+only ever created directly via `scripts/create-test-user.js`. Multiple
+accounts existing isn't evidence a signup flow is needed; it's evidence
+the script-based path already covers however many accounts this app
+actually needs. Dropped outright rather than deferred again.
