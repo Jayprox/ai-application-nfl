@@ -61,9 +61,65 @@ import EdgeBadge from '../components/EdgeBadge';
  * shows at the top of its own page, above the full pick-by-pick history —
  * that page is already reachable from the nav, so Board no longer fetches
  * or renders a second copy of the same four stat tiles.
+ *
+ * Date-grouped games (2026-09-17, Yahoo Sports/ESPN reference explore):
+ * "This Week's Games" now groups cards under a per-day heading ("Thursday,
+ * Sep 18") the way ESPN's board does, instead of one flat grid — most
+ * weeks split Thu/Sun/Mon (or add a Sat/int'l game), so the grouping
+ * gives the slate real structure without adding a new fetch or changing
+ * GameCard itself. Grouped by the viewer's own local calendar date, same
+ * "no fixed timezone" call GameCard.jsx's formatKickoff() already makes
+ * for the per-card time — deliberately NOT the removed game_slot concept
+ * (thursday_night/sunday_early/etc, dropped from GameCard 2026-09-16),
+ * since that was a fixed slot label where this is just "what date is it
+ * for you." Three other ESPN/Yahoo patterns were considered and
+ * explicitly deferred this pass: an expandable per-market odds table
+ * (would need an odds-history concept we don't capture yet — today's
+ * OddsBadge only keeps the latest synced line, no "Open"), a week-tab
+ * strip on Board (Board stays "this week only" by design; GamesPage.jsx
+ * is the place to browse other weeks), and Yahoo-style inline news
+ * callouts (no live injury/news feed exists yet — injury_reports isn't
+ * populated by any current data source).
  */
 
 const TOP_EDGES_LIMIT = 5;
+
+// Local calendar date as a sortable YYYY-MM-DD string, in the viewer's
+// own timezone (Intl's en-CA locale formats dates in that order) — used
+// only to group games under a date heading below, never sent anywhere.
+function dateGroupKey(iso) {
+  return new Date(iso).toLocaleDateString('en-CA');
+}
+
+function dateGroupHeading(iso) {
+  return new Date(iso).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+// Buckets `games` by local calendar date, preserving each bucket's
+// earliest-kickoff-first order and returning buckets in chronological
+// order — a game missing game_datetime (shouldn't happen for a real
+// schedule row, but GameCard's own formatKickoff() guards for it too)
+// falls into a trailing "Date TBD" bucket rather than being dropped.
+function groupGamesByDate(games) {
+  const TBD_KEY = 'tbd';
+  const byKey = new Map();
+  for (const game of games) {
+    const key = game.game_datetime ? dateGroupKey(game.game_datetime) : TBD_KEY;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        key,
+        heading: game.game_datetime ? dateGroupHeading(game.game_datetime) : 'Date TBD',
+        games: [],
+      });
+    }
+    byKey.get(key).games.push(game);
+  }
+  return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
 
 function SectionHeader({ title, linkTo, linkLabel }) {
   return (
@@ -206,14 +262,21 @@ export default function BoardPage() {
           ) : games.length === 0 ? (
             <p className="text-sm text-ink-dim">No games scheduled for week {week} yet.</p>
           ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {games.map((game) => (
-                <GameCard
-                  key={game.game_id}
-                  game={game}
-                  edge={edgeByGameId.get(game.game_id)}
-                  odds={oddsByGameId.get(game.game_id)}
-                />
+            <div className="space-y-5">
+              {groupGamesByDate(games).map((group) => (
+                <div key={group.key}>
+                  <h3 className="mb-2 text-sm font-semibold text-ink-dim">{group.heading}</h3>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {group.games.map((game) => (
+                      <GameCard
+                        key={game.game_id}
+                        game={game}
+                        edge={edgeByGameId.get(game.game_id)}
+                        odds={oddsByGameId.get(game.game_id)}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           )}
