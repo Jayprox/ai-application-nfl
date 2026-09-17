@@ -35,6 +35,22 @@
  * If this starts 404ing again down the line, that's model retirement,
  * not a bug — check platform.claude.com/docs and set ANTHROPIC_MODEL in
  * Railway rather than trusting this default indefinitely.
+ *
+ * NL search bar / get_player_stats (2026-09-17, backlog item — see
+ * docs/part2-roadmap.md's Backlog and architecture.md §5 for the
+ * original design). Closes the gap the original design called out: none
+ * of the tools above covered raw per-game stat lookups (season/career
+ * averages, splits) — only computed model reads. Two pieces: a new
+ * get_player_stats tool (wraps lib/stats-query.js's runStatsQuery(), the
+ * same engine POST /query uses) for the general LLM path, and a
+ * deterministic pre-LLM shortcut (see tryDeterministicStatsAnswer below)
+ * that answers the obvious canonical shapes ("Mahomes 2025", "Saquon
+ * Barkley career") without spending a Claude API call at all —
+ * architecture.md §5 explicitly flags that per-query LLM cost/latency as
+ * the reason NL search was cut from MVP in the first place. Deliberately
+ * scoped to Chat only, no new UI surface — Chat already renders whatever
+ * plain-text reply comes back, whether it came from the shortcut or from
+ * Claude, identically.
  * =========================================================================
  */
 
@@ -43,6 +59,13 @@ const { rankMatchups, STAT_CATEGORIES } = require('./ranking');
 const { listEdges } = require('./edge');
 const { computePlayerInsights } = require('./insights');
 const { getCurrentWeek } = require('./current-week');
+const {
+  runStatsQuery,
+  VALID_SCOPES,
+  VALID_GAME_SLOTS,
+  VALID_WEATHER,
+  PLAYER_STAT_COLUMNS,
+} = require('./stats-query');
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -53,13 +76,14 @@ const TOOL_RESULT_CHAR_CAP = 8000; // keeps one bad query result from blowing up
 
 const SYSTEM_PROMPT = `You are the Chalk That NFL research assistant, embedded in a stats/analytics app.
 
-You have read-only tools onto this app's own data: matchup rankings, model-vs-market edges, deterministic per-player insights, logged picks, and the agent leaderboard. Every number these tools return is a real computed value from ingested NFL data — never invent, estimate, or round-trip a number you didn't get from a tool.
+You have read-only tools onto this app's own data: matchup rankings, model-vs-market edges, deterministic per-player insights, raw per-game stat lookups (season/last5/career, with optional home/away, game-slot, or weather splits), logged picks, and the agent leaderboard. Every number these tools return is a real computed value from ingested NFL data — never invent, estimate, or round-trip a number you didn't get from a tool.
 
 You are scoped to this app only. If asked something with no connection to Chalk That NFL's own data or features — general coding help, DSA/algorithm questions, writing unrelated content, other sports, general trivia, personal advice, etc. — decline in one short sentence and point back to what you can help with (matchups, edges, insights, picks, leaderboard). Do not attempt the off-topic request itself, even partially.
 
 Rules:
 - If the user refers to "this week", "the current week", "this season", or otherwise leaves season/week unstated, call get_current_week first to resolve it to a concrete season/week, then use that for any other tool call that needs one. Don't ask the user to supply season/week unless get_current_week can't resolve one (e.g. no games in the schedule at all).
 - For any question involving specific numbers, rankings, players, or games, call a tool rather than answering from memory.
+- get_player_stats is raw actual production (season/career averages or totals, optionally split by home/away, game slot, or weather) — use it for "how did X do in Y" questions. get_player_insights is a different thing: a deterministic model read (matchup/form/situational/role-trend) relative to the player's NEXT game. Don't conflate the two.
 - If a tool returns no data or a null/no-signal result, say so plainly (e.g. "no matchup scores computed yet for that week") rather than filling the gap with a guess.
 - You cannot generate or log new picks — if asked to "make a pick" or "bet on X", explain that's a separate feature (the Picks/portfolio agent) and instead describe what the data actually shows for that spot.
 - This is analysis of a fantasy/predictive model, not betting advice or a guarantee of outcomes — keep that framing when discussing edges or rankings.
@@ -124,6 +148,23 @@ const TOOLS = [
         season: { type: 'integer' },
       },
       required: ['player_id', 'season'],
+    },
+  },
+  {
+    name: 'get_player_stats',
+    description:
+      "Raw stat lookup for one player — season averages, career totals, last-5-game averages, or a full game log — optionally filtered by home/away, game slot (e.g. 'thursday_night', 'monday_night'), or weather. Real per-game production from the *_game_stats tables, not a computed model read — use this for \"how did X do in Y\" questions. Requires a player_id from find_player.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        player_id: { type: 'string' },
+        scope: { type: 'string', enum: VALID_SCOPES, description: 'season/last5/career/game_log. season, last5, and game_log all need season; career does not.' },
+        season: { type: 'integer', description: 'e.g. 2026 — required unless scope is "career".' },
+        home_away: { type: 'string', enum: ['home', 'away'] },
+        game_slot: { type: 'string', enum: VALID_GAME_SLOTS },
+        weather_condition: { type: 'string', enum: VALID_WEATHER },
+      },
+      required: ['player_id', 'scope'],
     },
   },
   {
@@ -197,6 +238,28 @@ async function executeTool(name, input) {
       return result || { error: 'player not found' };
     }
 
+    case 'get_player_stats': {
+      if (!VALID_SCOPES.includes(input.scope)) {
+        return { error: `scope must be one of: ${VALID_SCOPES.join(', ')}` };
+      }
+      if (input.scope !== 'career' && !input.season) {
+        return { error: 'season is required unless scope is "career"' };
+      }
+      const splits = {};
+      if (input.home_away) splits.home_away = input.home_away;
+      if (input.game_slot) splits.game_slot = input.game_slot;
+      if (input.weather_condition) splits.weather_condition = input.weather_condition;
+      const result = await runStatsQuery({
+        entity_type: 'player',
+        entity_id: input.player_id,
+        scope: input.scope,
+        season: input.season,
+        splits,
+      });
+      if (result.error) return { error: result.error };
+      return { data: result.data, sample_size: result.sampleSize };
+    }
+
     case 'get_picks': {
       const conditions = [];
       const params = [];
@@ -262,6 +325,202 @@ async function executeTool(name, input) {
   }
 }
 
+// ---------------------------------------------------------------------
+// Deterministic StatMuse-style shortcut (2026-09-17, NL search bar
+// backlog item). Tries to answer simple, unambiguous raw-stat questions
+// ("Mahomes 2025", "Saquon Barkley career", "CMC thursday night")
+// without ever calling Claude — architecture.md §5 flags a live LLM call
+// as a real per-query cost/latency hit, and these canonical shapes don't
+// need one. Deliberately conservative: fires ONLY when exactly one
+// player name matches and at least one recognized scope/split/season
+// keyword is present in the message; otherwise returns null and
+// runChat() falls through to the normal Claude tool-calling loop (which
+// still has get_player_stats available, so nothing this shortcut
+// declines to handle becomes unanswerable — it just costs a real LLM
+// call instead, same as before this shortcut existed). Never guesses on
+// an ambiguous match: multiple player hits, or no recognized keyword at
+// all, both fall through rather than answer with anything unconfirmed.
+// ---------------------------------------------------------------------
+
+const GAME_SLOT_PHRASES = {
+  'thursday night': 'thursday_night',
+  'monday night': 'monday_night',
+  'sunday night': 'sunday_night',
+  thanksgiving: 'thanksgiving',
+  saturday: 'saturday',
+};
+const WEATHER_PHRASES = {
+  rain: 'rain',
+  rainy: 'rain',
+  snow: 'snow',
+  snowy: 'snow',
+  dome: 'dome',
+  indoors: 'dome',
+  sunny: 'sunny',
+  overcast: 'overcast',
+};
+const GAME_SLOT_LABEL = {
+  thursday_night: 'Thursday nights',
+  monday_night: 'Monday nights',
+  sunday_night: 'Sunday nights',
+  thanksgiving: 'Thanksgiving',
+  saturday: 'Saturdays',
+};
+const STAT_LABELS = {
+  pass_attempts: 'pass att', pass_completions: 'completions', passing_yards: 'pass yds', passing_tds: 'pass TD',
+  interceptions_thrown: 'INT', sacks_taken: 'sacks taken', rush_attempts: 'rush att', rushing_yards: 'rush yds',
+  rushing_tds: 'rush TD', fumbles: 'fumbles', targets: 'targets', receptions: 'rec', receiving_yards: 'rec yds', receiving_tds: 'rec TD',
+  tackles_solo: 'solo tkl', tackles_assist: 'ast tkl', sacks: 'sacks', tackles_for_loss: 'TFL', qb_hits: 'QB hits',
+  interceptions: 'INT', passes_defended: 'PD', forced_fumbles: 'FF', fumble_recoveries: 'FR', defensive_tds: 'def TD',
+  fg_attempts: 'FG att', fg_made: 'FG made', longest_fg: 'long FG', xp_attempts: 'XP att', xp_made: 'XP made',
+  punts: 'punts', punt_yards: 'punt yds', punt_avg: 'punt avg', kick_return_yards: 'KR yds', punt_return_yards: 'PR yds', return_tds: 'ret TD',
+};
+// Words that show up in a natural stat question but don't help identify
+// the player — stripped before treating what's left as the name
+// candidate, so "how did Mahomes do this season" still isolates
+// "Mahomes" rather than failing to match on the whole phrase.
+const FILLER_WORDS = ['how', 'did', 'do', 'does', 'in', 'this', 'season', 'stats', 'stat', 'what', 'were', 'was', 'his', 'her', 'the', 'for', 'a', 'an', 'of', 'game', 'games', 'give', 'me', 'tell', 'show', 'get', 'and'];
+
+function extractDeterministicIntent(message) {
+  let remaining = ` ${message.toLowerCase().replace(/'s\b/g, '').replace(/[?.,!]/g, ' ')} `;
+  const splits = {};
+  let scope = null;
+  let season = null;
+  let matchedKeyword = false;
+
+  for (const [phrase, slot] of Object.entries(GAME_SLOT_PHRASES)) {
+    if (remaining.includes(` ${phrase} `)) {
+      splits.game_slot = slot;
+      remaining = remaining.replace(` ${phrase} `, ' ');
+      matchedKeyword = true;
+      break;
+    }
+  }
+  for (const [phrase, cond] of Object.entries(WEATHER_PHRASES)) {
+    if (remaining.includes(` ${phrase} `)) {
+      splits.weather_condition = cond;
+      remaining = remaining.replace(` ${phrase} `, ' ');
+      matchedKeyword = true;
+      break;
+    }
+  }
+  if (remaining.includes(' home ')) {
+    splits.home_away = 'home';
+    remaining = remaining.replace(' home ', ' ');
+    matchedKeyword = true;
+  } else if (remaining.includes(' away ') || remaining.includes(' on the road ')) {
+    splits.home_away = 'away';
+    remaining = remaining.replace(' away ', ' ').replace(' on the road ', ' ');
+    matchedKeyword = true;
+  }
+
+  if (remaining.includes(' career ')) {
+    scope = 'career';
+    remaining = remaining.replace(' career ', ' ');
+    matchedKeyword = true;
+  } else if (remaining.includes(' last 5 ') || remaining.includes(' last five ') || remaining.includes(' last5 ')) {
+    scope = 'last5';
+    remaining = remaining.replace(' last 5 ', ' ').replace(' last five ', ' ').replace(' last5 ', ' ');
+    matchedKeyword = true;
+  } else if (remaining.includes(' game log ') || remaining.includes(' gamelog ') || remaining.includes(' every game ')) {
+    scope = 'game_log';
+    remaining = remaining.replace(' game log ', ' ').replace(' gamelog ', ' ').replace(' every game ', ' ');
+    matchedKeyword = true;
+  } else if (remaining.includes(' season ')) {
+    scope = 'season';
+    matchedKeyword = true;
+  }
+
+  const yearMatch = remaining.match(/\b(19|20)\d{2}\b/);
+  if (yearMatch) {
+    season = parseInt(yearMatch[0], 10);
+    remaining = remaining.replace(yearMatch[0], ' ');
+    matchedKeyword = true;
+  }
+
+  const nameCandidate = remaining
+    .split(/\s+/)
+    .filter((w) => w && !FILLER_WORDS.includes(w))
+    .join(' ')
+    .trim();
+
+  if (!matchedKeyword || nameCandidate.length < 3) return null;
+  if (!scope) scope = 'season';
+
+  return { nameCandidate, scope, season, splits };
+}
+
+function describeSplits(splits) {
+  const bits = [];
+  if (splits.game_slot) bits.push(GAME_SLOT_LABEL[splits.game_slot] || splits.game_slot);
+  if (splits.weather_condition) bits.push(`in ${splits.weather_condition}`);
+  if (splits.home_away) bits.push(splits.home_away === 'home' ? 'at home' : 'on the road');
+  return bits.length ? ` (${bits.join(', ')})` : '';
+}
+
+function formatStatsReply(player, scope, season, splits, data, sampleSize) {
+  const splitPhrase = describeSplits(splits);
+  const scopeLabel = { season: `${season} season`, last5: 'last 5 games', career: 'career', game_log: `${season} game log` }[scope];
+
+  if (scope === 'game_log') {
+    if (!data.length) return `${player.full_name} has no logged games for ${scopeLabel}${splitPhrase}.`;
+    const cols = PLAYER_STAT_COLUMNS[player.position_group] || [];
+    const lines = data.slice(0, 10).map((row) => {
+      const nonZero = cols.filter((c) => Number(row[c]) > 0).map((c) => `${STAT_LABELS[c] || c} ${row[c]}`);
+      return `Wk ${row.week}: ${nonZero.join(', ') || 'no production logged'}`;
+    });
+    const more = data.length > 10 ? ` (+${data.length - 10} more games)` : '';
+    return `${player.full_name} — ${scopeLabel}${splitPhrase} (${data.length} games):\n${lines.join('\n')}${more}`;
+  }
+
+  if (!sampleSize) {
+    return `${player.full_name} has no recorded games for ${scopeLabel}${splitPhrase}.`;
+  }
+
+  const cols = PLAYER_STAT_COLUMNS[player.position_group] || [];
+  const parts = cols
+    .map((c) => [c, Number(data[c]) || 0])
+    .filter(([, v]) => Math.abs(v) > 0.01)
+    .map(([c, v]) => `${STAT_LABELS[c] || c} ${c === 'punt_avg' || scope !== 'career' ? v.toFixed(1) : Math.round(v)}`);
+
+  const totalsWord = scope === 'career' ? 'totals' : 'averages';
+  const body = parts.length ? parts.join(', ') : 'no recorded production';
+  return `${player.full_name} — ${scopeLabel}${splitPhrase} ${totalsWord} (${sampleSize} game${sampleSize === 1 ? '' : 's'}): ${body}.`;
+}
+
+async function tryDeterministicStatsAnswer(message) {
+  if (typeof message !== 'string' || !message.trim()) return null;
+
+  const intent = extractDeterministicIntent(message);
+  if (!intent) return null;
+
+  const { rows: playerRows } = await query(
+    `SELECT player_id, full_name, position, position_group
+     FROM players WHERE full_name ILIKE $1 LIMIT 2`,
+    [`%${intent.nameCandidate}%`]
+  );
+  if (playerRows.length !== 1) return null; // no match, or ambiguous — let Claude handle it
+
+  const player = playerRows[0];
+  let season = intent.season;
+  if (intent.scope !== 'career' && !season) {
+    const current = await getCurrentWeek();
+    if (!current) return null;
+    season = current.season;
+  }
+
+  const result = await runStatsQuery({
+    entity_type: 'player',
+    entity_id: player.player_id,
+    scope: intent.scope,
+    season,
+    splits: intent.splits,
+  });
+  if (result.error) return null; // fall through rather than surface a raw error deterministically
+
+  return formatStatsReply(player, intent.scope, season, intent.splits, result.data, result.sampleSize);
+}
+
 async function callClaude(messages) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -301,6 +560,17 @@ async function callClaude(messages) {
  * @returns {Promise<{ reply: string }>}
  */
 async function runChat(history) {
+  // routes/chat.js guarantees the last message has role 'user' before
+  // calling this, so no need to search from the end here.
+  const latestUserMessage = history[history.length - 1]?.content;
+  if (latestUserMessage) {
+    const deterministicReply = await tryDeterministicStatsAnswer(latestUserMessage).catch((err) => {
+      console.error('[orchestrator] deterministic shortcut failed, falling through to Claude:', err.message);
+      return null;
+    });
+    if (deterministicReply) return { reply: deterministicReply };
+  }
+
   let messages = history.map((m) => ({ role: m.role, content: m.content }));
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
