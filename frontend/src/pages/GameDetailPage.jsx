@@ -42,6 +42,27 @@ import InjuryBadge from '../components/InjuryBadge';
  * treated as secondary the same way GamesPage.jsx treats edge/odds on a
  * card — a slow or failed fetch just renders that section's own
  * graceful-empty state rather than blocking the header from showing.
+ *
+ * Box score rework (2026-09-17, Yahoo Sports app reference explore):
+ * switched from a side-by-side away+home layout with a collapsible full
+ * breakdown to a single team-toggle pill (matches the reference app's
+ * own team switcher) showing one team's full stat-category breakdown at
+ * a time. Special teams also split from one combined table into four —
+ * Kicking / Punting / Punt Return / Kick Return — matching the
+ * reference's category boundaries, though NOT its exact columns: our
+ * schema (backend/lib/stats-query.js's PLAYER_STAT_COLUMNS.special_teams)
+ * has no FG%, no kicker scoring total, no In20/In10/touchback/blocked-punt
+ * tracking, no per-return attempt count, and return_tds isn't split by
+ * return type (one combined column, can't tell a punt-return TD from a
+ * kick-return TD) — those columns just don't exist here, so the Kicking/
+ * Punting/Punt Return/Kick Return tables below only ever show real
+ * synced columns, never an invented or estimated one. Every player name
+ * in Top Performers and the category tables links to that player's page
+ * with ?scope=last5, landing directly on PlayerDetailPage's Last 5 Games
+ * tab (see that page's own new useSearchParams read) instead of the
+ * page's default Season Avg view — the natural next question after
+ * seeing one game's line is "how's he been playing lately," not the
+ * full-season average.
  */
 
 const MARKET_LABEL = { spreads: 'Spread', h2h: 'Moneyline', totals: 'Total' };
@@ -149,22 +170,60 @@ const DEFENSE_CATEGORY = {
   ],
 };
 
-const SPECIAL_TEAMS_CATEGORY = {
-  key: 'special_teams',
-  label: 'Special Teams',
-  filterKeys: ['fg_attempts', 'xp_attempts', 'punts', 'kick_return_yards', 'punt_return_yards'],
+// Special teams split into 4 tables (2026-09-17, Yahoo reference) —
+// see this file's header comment for exactly which Yahoo columns we
+// don't have and why (schema gap, not an oversight). return_tds isn't
+// split by return type in the schema, so it's deliberately left out of
+// both return tables below rather than guessed at.
+const KICKING_CATEGORY = {
+  key: 'kicking',
+  group: 'special_teams',
+  label: 'Kicking',
+  filterKeys: ['fg_attempts', 'xp_attempts'],
   columns: [
     ['fg_made', 'FG'],
     ['fg_attempts', 'FGA'],
     ['longest_fg', 'LNG'],
     ['xp_made', 'XP'],
-    ['punts', 'PUNT'],
-    ['punt_avg', 'AVG'],
-    ['kick_return_yards', 'KR YDS'],
-    ['punt_return_yards', 'PR YDS'],
-    ['return_tds', 'TD'],
+    ['xp_attempts', 'XPA'],
   ],
 };
+const PUNTING_CATEGORY = {
+  key: 'punting',
+  group: 'special_teams',
+  label: 'Punting',
+  filterKeys: ['punts'],
+  columns: [
+    ['punts', 'PUNT'],
+    ['punt_yards', 'YDS'],
+    ['punt_avg', 'AVG'],
+  ],
+};
+const PUNT_RETURN_CATEGORY = {
+  key: 'punt_return',
+  group: 'special_teams',
+  label: 'Punt Return',
+  filterKeys: ['punt_return_yards'],
+  columns: [['punt_return_yards', 'YDS']],
+};
+const KICK_RETURN_CATEGORY = {
+  key: 'kick_return',
+  group: 'special_teams',
+  label: 'Kick Return',
+  filterKeys: ['kick_return_yards'],
+  columns: [['kick_return_yards', 'YDS']],
+};
+
+// Rendering order matches the Yahoo reference: Passing/Rushing/Receiving,
+// Kicking, Punting, Defense, Punt Return, Kick Return.
+const ALL_BOX_SCORE_CATEGORIES = [
+  ...OFFENSE_CATEGORIES.map((c) => ({ ...c, group: 'offense' })),
+  KICKING_CATEGORY,
+  PUNTING_CATEGORY,
+  { ...DEFENSE_CATEGORY, group: 'defense' },
+  PUNT_RETURN_CATEGORY,
+  KICK_RETURN_CATEGORY,
+];
 
 function nonZeroRows(rows, filterKeys) {
   return rows.filter((r) => filterKeys.some((k) => Number(r[k]) > 0));
@@ -199,29 +258,30 @@ function formatSyncedAt(freshness) {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-function TopPerformers({ label, offenseRows }) {
+// No team label here -- the team toggle right above this already
+// establishes which team's leaders these are (2026-09-17 rework; the
+// old side-by-side layout needed the per-team label, a single-team
+// view doesn't).
+function TopPerformers({ offenseRows }) {
   const leaders = teamLeaders(offenseRows);
   if (leaders.length === 0) return null;
   return (
-    <div>
-      <h3 className="text-xs font-medium text-ink-dim mb-1.5">{label}</h3>
-      <ul className="space-y-1">
-        {leaders.map((l) => (
-          <li
-            key={l.label}
-            className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
-          >
-            <span className="w-20 shrink-0 text-xs uppercase tracking-wide text-ink-faint">{l.label}</span>
-            <Link to={`/players/${l.player.player_id}`} className="flex-1 truncate text-link hover:underline">
-              {l.player.full_name}
-            </Link>
-            <span className="shrink-0 text-xs text-ink tabular-nums">
-              {l.stat} YDS{l.td ? `, ${l.td} TD` : ''}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ul className="space-y-1">
+      {leaders.map((l) => (
+        <li
+          key={l.label}
+          className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
+        >
+          <span className="w-20 shrink-0 text-xs uppercase tracking-wide text-ink-faint">{l.label}</span>
+          <Link to={`/players/${l.player.player_id}?scope=last5`} className="flex-1 truncate text-link hover:underline">
+            {l.player.full_name}
+          </Link>
+          <span className="shrink-0 text-xs text-ink tabular-nums">
+            {l.stat} YDS{l.td ? `, ${l.td} TD` : ''}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -247,7 +307,7 @@ function BoxScoreCategoryTable({ category, rows }) {
             {filtered.map((r) => (
               <tr key={r.player_id} className="border-t border-line">
                 <td className="py-1 pr-2">
-                  <Link to={`/players/${r.player_id}`} className="text-link hover:underline">
+                  <Link to={`/players/${r.player_id}?scope=last5`} className="text-link hover:underline">
                     {r.full_name}
                   </Link>{' '}
                   <span className="text-xs text-ink-faint">{r.position}</span>
@@ -286,7 +346,7 @@ export default function GameDetailPage() {
   // stale on the same "game is in_progress" condition the score/clock
   // do, so it reuses that state rather than deriving its own.
   const { data: boxscoreData } = useApiFetch(`/games/${gameId}/boxscore`, { pollMs: livePollMs });
-  const [showFullBoxScore, setShowFullBoxScore] = useState(false);
+  const [activeSide, setActiveSide] = useState('away');
 
   if (loading || error) {
     return <AsyncState loading={loading} error={error} loadingLabel="Loading game…" onRetry={refetch} />;
@@ -328,6 +388,7 @@ export default function GameDetailPage() {
   const boxscore = boxscoreData?.data;
   const boxscoreSampleSize = boxscoreData?.meta?.sample_size ?? 0;
   const boxscoreSyncedAtLabel = formatSyncedAt(boxscoreData?.meta?.freshness);
+  const activeBoxscoreSide = boxscore ? (activeSide === 'away' ? boxscore.away : boxscore.home) : null;
 
   return (
     <div>
@@ -467,36 +528,32 @@ export default function GameDetailPage() {
             </p>
           ) : (
             <div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <TopPerformers label={game.away_team_abbr} offenseRows={boxscore.away.offense} />
-                <TopPerformers label={game.home_team_abbr} offenseRows={boxscore.home.offense} />
+              <div className="mb-4 flex max-w-xs rounded-md border border-line bg-surface p-0.5">
+                {[
+                  { key: 'away', abbr: game.away_team_abbr },
+                  { key: 'home', abbr: game.home_team_abbr },
+                ].map((t) => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setActiveSide(t.key)}
+                    className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                      activeSide === t.key ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
+                    }`}
+                  >
+                    {t.abbr}
+                  </button>
+                ))}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowFullBoxScore((v) => !v)}
-                className="mt-3 text-sm text-ink-dim underline hover:text-ink"
-              >
-                {showFullBoxScore ? 'Hide full box score' : 'Show full box score'}
-              </button>
+              <h3 className="mb-1.5 text-xs font-medium text-ink-dim">Top Performers</h3>
+              <TopPerformers offenseRows={activeBoxscoreSide.offense} />
 
-              {showFullBoxScore && (
-                <div className="mt-3 grid gap-6 sm:grid-cols-2">
-                  {[
-                    { label: game.away_team_abbr, side: boxscore.away },
-                    { label: game.home_team_abbr, side: boxscore.home },
-                  ].map(({ label, side }) => (
-                    <div key={label}>
-                      <h3 className="mb-1.5 text-xs font-medium text-ink-dim">{label}</h3>
-                      {OFFENSE_CATEGORIES.map((cat) => (
-                        <BoxScoreCategoryTable key={cat.key} category={cat} rows={side.offense} />
-                      ))}
-                      <BoxScoreCategoryTable category={DEFENSE_CATEGORY} rows={side.defense} />
-                      <BoxScoreCategoryTable category={SPECIAL_TEAMS_CATEGORY} rows={side.special_teams} />
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="mt-4">
+                {ALL_BOX_SCORE_CATEGORIES.map((cat) => (
+                  <BoxScoreCategoryTable key={cat.key} category={cat} rows={activeBoxscoreSide[cat.group]} />
+                ))}
+              </div>
 
               {boxscoreSyncedAtLabel && (
                 <p className="mt-2 text-xs text-ink-faint">
@@ -509,5 +566,5 @@ export default function GameDetailPage() {
         </section>
       </div>
     </div>
-   );
+  );
 }

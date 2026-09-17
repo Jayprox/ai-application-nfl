@@ -256,6 +256,37 @@ recent_form/role_trend.
   consumer, same "spend headroom where it shows in the product" call
   `LIVE_SCORE_INTERVAL_MINUTES` already made 2026-09-15 — see that
   constant's own comment in `worker/ingestion-worker.js` for the math.
+- **Box score rework: team toggle + category split — done, 2026-09-17.**
+  Same-day follow-up once real screenshots of the requested reference
+  (the Yahoo Sports app's per-game Stats tab) were available. Replaced
+  the side-by-side away+home layout with a single team-toggle pill (the
+  reference's own pattern) showing one team's full breakdown at a time,
+  and split the one combined Special Teams table into four — Kicking /
+  Punting / Punt Return / Kick Return — matching the reference's
+  category boundaries. Deliberately does NOT match the reference's exact
+  columns: our schema (`PLAYER_STAT_COLUMNS.special_teams`) has no FG%,
+  no kicker scoring total, no In20/In10/touchback/blocked-punt tracking,
+  no per-return attempt count, and `return_tds` isn't split by return
+  type — those columns don't exist here, so the four tables only ever
+  render real synced columns, never an invented or estimated one. Every
+  player name (Top Performers and the category tables) now links to
+  `/players/:id?scope=last5`, landing directly on PlayerDetailPage's
+  Last 5 Games tab — see that page's own new `useSearchParams`-driven
+  scope, added same day so this link actually lands somewhere real
+  instead of always opening to Season Avg regardless of where it came
+  from.
+- **Season Total added to PlayerDetailPage — done, 2026-09-17.** Same
+  request as above ("total stats for the season, not just the average").
+  `lib/stats-query.js` gets a new `season_total` scope — SUM (with the
+  same longest_fg/punt_avg exceptions `career`'s SUM already uses), just
+  scoped to one season instead of every season on record. Genuinely
+  distinct from both existing scopes: `season` was already SUM's
+  cousin in name only — it's actually a per-game AVERAGE (hence the
+  "Season Avg" tab label), and `career` sums across every season, not
+  one. Wired into `POST /query` (and, for free, the chat agent's
+  `get_player_stats` tool, since both read the same `VALID_SCOPES`
+  constant) and a new "Season Total" tab on PlayerDetailPage, next to
+  "Season Avg."
 - Deliberately NOT done: drive events (play-by-play). Unlike the box
   score above, this has no confirmed data source at all — nflverse is a
   batch/historical export with no live feed, and the one Highlightly
@@ -468,6 +499,10 @@ not silently dropped" convention — these were previously sitting under
 - **Top performers + live box score — done, 2026-09-17.** See the Phase 5
   section above for the full writeup; noted here too since it was this
   session's second backlog item shipped the same day as the search bar.
+- **Box score rework (team toggle + category split) and Season Total —
+  done, 2026-09-17.** Same-day follow-up requested with real Yahoo
+  Sports app screenshots as reference. See the Phase 5 section above for
+  the full writeup.
 
 ## Backlog
 

@@ -9,8 +9,8 @@
  * Body:
  *   entity_type: "player" | "team"
  *   entity_id:   player UUID, or numeric team_id
- *   scope:       "season" | "last5" | "career" | "game_log"
- *   season:      required for season/last5/game_log, ignored for career
+ *   scope:       "season" | "season_total" | "last5" | "career" | "game_log"
+ *   season:      required for season/season_total/last5/game_log, ignored for career
  *   splits:      optional { home_away, game_slot, weather_condition }
  *
  * Response:
@@ -18,15 +18,24 @@
  *             (career)...} | [...game log rows...],
  *     meta: { sample_size, freshness: { synced_at } } }
  *
- * career vs season/last5: "Career" is deliberately cumulative totals
- * (SUM), not another per-game average, even though it shares a query
- * shape with season/last5 — a user reading "Career: 77.5 yards" and a
- * user reading "Career: 6,252 yards" come away with very different
- * impressions of the same underlying data, and the tab is labeled
- * "Career" (not "Career Avg", unlike "Season Avg"), so the label already
- * promised totals. Rate-like columns that can't be honestly summed
- * (a kicker's longest field goal, a punter's per-punt average) use a
- * different aggregate — see lib/stats-query.js's CAREER_AGGREGATE_OVERRIDE.
+ * career vs season/season_total/last5: "Career" is deliberately
+ * cumulative totals (SUM), not another per-game average, even though it
+ * shares a query shape with season/last5 — a user reading "Career: 77.5
+ * yards" and a user reading "Career: 6,252 yards" come away with very
+ * different impressions of the same underlying data, and the tab is
+ * labeled "Career" (not "Career Avg", unlike "Season Avg"), so the label
+ * already promised totals. Rate-like columns that can't be honestly
+ * summed (a kicker's longest field goal, a punter's per-punt average)
+ * use a different aggregate — see lib/stats-query.js's
+ * CAREER_AGGREGATE_OVERRIDE.
+ *
+ * season_total (2026-09-17, "add season totals to Players too" request)
+ * is the same idea as career, just scoped to one season instead of every
+ * season on record — SUM (with the same rate-like-column exceptions),
+ * not the per-game average "season" already returns. Three genuinely
+ * different things now share this route's scope param: season (avg,
+ * one season), season_total (sum, one season), career (sum, every
+ * season).
  *
  * Note: until the historical-data ingestion pass runs, `games` and the
  * *_game_stats tables are empty — every query here will correctly return
@@ -69,7 +78,7 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: `scope must be one of: ${VALID_SCOPES.join(', ')}` });
   }
   if (scope !== 'career' && !season) {
-    return res.status(400).json({ error: 'season is required for season/last5/game_log scope' });
+    return res.status(400).json({ error: 'season is required for season/season_total/last5/game_log scope' });
   }
   if (scope !== 'career' && !/^\d{4}$/.test(String(season))) {
     // Without this, a non-numeric season (or e.g. "20255") reaches the DB

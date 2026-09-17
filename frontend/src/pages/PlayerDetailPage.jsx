@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useApiFetch } from '../hooks/useApiFetch';
 import { useStatsQuery } from '../hooks/useStatsQuery';
 import AsyncState from '../components/AsyncState';
@@ -22,6 +22,7 @@ const selectClass =
 
 const SCOPES = [
   { value: 'season', label: 'Season Avg' },
+  { value: 'season_total', label: 'Season Total' },
   { value: 'last5', label: 'Last 5 Games' },
   { value: 'career', label: 'Career' },
   { value: 'game_log', label: 'Game Log' },
@@ -64,11 +65,34 @@ function opponentAbbr(gameId, isHome) {
 
 export default function PlayerDetailPage() {
   const { playerId } = useParams();
-  const [scope, setScope] = useState('season');
+  // Deep-linkable scope (2026-09-17, GameDetailPage's box score now
+  // links here with ?scope=last5 so "who is this guy, how's he playing
+  // lately" is one click, not three) -- falls back to the default
+  // 'season' tab for a bare /players/:id, or an unrecognized ?scope.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedScope = searchParams.get('scope');
+  const initialScope = SCOPES.some((s) => s.value === requestedScope) ? requestedScope : 'season';
+  const [scope, setScope] = useState(initialScope);
   const [season, setSeason] = useState(DEFAULT_SEASON);
   const [homeAway, setHomeAway] = useState('');
   const [gameSlot, setGameSlot] = useState('');
   const [weatherCondition, setWeatherCondition] = useState('');
+
+  // Keeps the URL in sync with the tab (shareable link, working back
+  // button) rather than only reading it once on mount -- 'season' is the
+  // default so it's left out of the URL rather than written as ?scope=season.
+  const handleScopeChange = (value) => {
+    setScope(value);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === 'season') next.delete('scope');
+        else next.set('scope', value);
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   const {
     data: playerData,
@@ -138,7 +162,7 @@ export default function PlayerDetailPage() {
             <button
               key={s.value}
               type="button"
-              onClick={() => setScope(s.value)}
+              onClick={() => handleScopeChange(s.value)}
               className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                 scope === s.value ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
               }`}

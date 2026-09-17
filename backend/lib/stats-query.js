@@ -71,11 +71,20 @@ const CAREER_AGGREGATE_OVERRIDE = {
   punt_avg: 'AVG',
 };
 
+// season_total (2026-09-17, "add season totals to Players too" request)
+// reuses this exact same override table via careerAggFn() below -- it's
+// SUM-with-the-same-exceptions, just scoped to one season instead of a
+// player's whole career. Genuinely distinct from both existing scopes:
+// "season" already existed but is a per-game AVERAGE (the tab is labeled
+// "Season Avg" for exactly this reason) and "career" is a SUM but across
+// every season on record, not one. See routes/query.js's header comment
+// for the full season/season_total/career distinction written out.
+
 function careerAggFn(column) {
   return CAREER_AGGREGATE_OVERRIDE[column] || 'SUM';
 }
 
-const VALID_SCOPES = ['season', 'last5', 'career', 'game_log'];
+const VALID_SCOPES = ['season', 'season_total', 'last5', 'career', 'game_log'];
 const VALID_GAME_SLOTS = [
   'sunday_early', 'sunday_late', 'sunday_night', 'monday_night',
   'thursday_night', 'thanksgiving', 'saturday', 'other',
@@ -177,6 +186,17 @@ async function queryPlayer({ entity_id, scope, season, splits }) {
     return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
   }
 
+  if (scope === 'season_total') {
+    const { rows } = await query(
+      `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS ${c}`).join(', ')}
+       FROM ${table} stats
+       JOIN games g ON g.game_id = stats.game_id
+       ${whereSql}`,
+      params
+    );
+    return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
+  }
+
   // season
   const { rows } = await query(
     `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `AVG(stats.${c})::float8 AS ${c}`).join(', ')}
@@ -231,6 +251,17 @@ async function queryTeam({ entity_id, scope, season, splits }) {
   }
 
   if (scope === 'career') {
+    const { rows } = await query(
+      `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS ${c}`).join(', ')}
+       FROM team_game_stats stats
+       JOIN games g ON g.game_id = stats.game_id
+       ${whereSql}`,
+      params
+    );
+    return { data: stripSampleSize(rows[0]), sampleSize: parseInt(rows[0].sample_size, 10) };
+  }
+
+  if (scope === 'season_total') {
     const { rows } = await query(
       `SELECT COUNT(*) AS sample_size, ${columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS ${c}`).join(', ')}
        FROM team_game_stats stats
