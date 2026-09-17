@@ -24,6 +24,29 @@
  *                              comment for why a season/week-scoped query
  *                              is possible here (injury_reports carries
  *                              team_id/season/week directly).
+ * GET /games/:gameId/boxscore — both rosters' per-player stat lines for
+ *                              THIS game, split into { home, away } and
+ *                              grouped into { offense, defense,
+ *                              special_teams } same as the *_game_stats
+ *                              tables themselves (2026-09-17, "fuller
+ *                              live gamecast view" backlog item — see
+ *                              docs/part2-roadmap.md). Deliberately its
+ *                              own route rather than a POST /query call:
+ *                              that engine is scoped to one player/team +
+ *                              season, with no way to ask "every player
+ *                              in game X" — this is a straight
+ *                              game_id-scoped read instead, same shape as
+ *                              the injuries route above. The data itself
+ *                              isn't new — sync_live_stats
+ *                              (worker/ingestion-worker.js) has written
+ *                              real live box-score lines into these same
+ *                              tables since the live-scoring rollout;
+ *                              this route is the first thing that
+ *                              actually reads them for display. Returns
+ *                              null data (not 404) for a game that
+ *                              hasn't kicked off yet — same "don't fake
+ *                              it, show a graceful empty state" norm as
+ *                              the rest of this app.
  *
  * This is the "front door" data source for Part 2 Phase 3's Games/Slate
  * page (docs/part2-roadmap.md) — a sportsbook-scoreboard-style week view
@@ -57,6 +80,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { getCurrentWeek } = require('../lib/current-week');
+const { PLAYER_STAT_TABLES, PLAYER_STAT_COLUMNS } = require('../lib/stats-query');
 
 const router = express.Router();
 
@@ -196,6 +220,70 @@ router.get('/:gameId/injuries', async (req, res) => {
   } catch (err) {
     if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
     console.error('[routes/games] injuries lookup failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/:gameId/boxscore — see header comment above for why this is
+// its own route rather than reusing POST /query's engine. Queries all
+// three *_game_stats tables directly by game_id (PLAYER_STAT_TABLES/
+// PLAYER_STAT_COLUMNS imported from lib/stats-query.js — same column
+// lists that engine uses, so a stat added there automatically shows up
+// here too) rather than per-player, since "every player who recorded a
+// stat in this game" has no player_id to scope by up front. Split into
+// { home, away } by team_id, and within each side into
+// { offense, defense, special_teams } — the frontend derives its own
+// "top performers" (passing/rushing/receiving leaders) from the offense
+// array rather than this route pre-computing a curated list, same "return
+// the real numbers, format client-side" split /query already draws.
+router.get('/:gameId/boxscore', async (req, res) => {
+  const { gameId } = req.params;
+  try {
+    const { rows: gameRows } = await query(
+      `SELECT home_team_id, away_team_id, status FROM games WHERE game_id = $1`,
+      [gameId]
+    );
+    const game = gameRows[0];
+    if (!game) return res.status(404).json({ error: 'game not found' });
+
+    // A game that hasn't kicked off yet has no box score to show — not
+    // an error, just nothing to report yet (same norm as an empty
+    // sample_size elsewhere in this app, e.g. POST /query before the
+    // historical backfill has run).
+    if (game.status === 'scheduled') {
+      return res.json({ data: null, meta: { reason: 'game has not started yet' } });
+    }
+
+    const rowsByGroup = {};
+    let totalRows = 0;
+    for (const [group, table] of Object.entries(PLAYER_STAT_TABLES)) {
+      const columns = PLAYER_STAT_COLUMNS[group];
+      const { rows } = await query(
+        `SELECT stats.player_id, stats.team_id, p.full_name, p.position,
+                ${columns.map((c) => `stats.${c}`).join(', ')}
+         FROM ${table} stats
+         JOIN players p ON p.player_id = stats.player_id
+         WHERE stats.game_id = $1`,
+        [gameId]
+      );
+      rowsByGroup[group] = rows;
+      totalRows += rows.length;
+    }
+
+    const forTeam = (teamId) => ({
+      offense: rowsByGroup.offense.filter((r) => r.team_id === teamId),
+      defense: rowsByGroup.defense.filter((r) => r.team_id === teamId),
+      special_teams: rowsByGroup.special_teams.filter((r) => r.team_id === teamId),
+    });
+
+    const freshness = await getFreshness('sync_live_stats');
+    res.json({
+      data: { home: forTeam(game.home_team_id), away: forTeam(game.away_team_id) },
+      meta: { sample_size: totalRows, freshness },
+    });
+  } catch (err) {
+    if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
+    console.error('[routes/games] boxscore lookup failed:', err);
     res.status(500).json({ error: 'internal error' });
   }
 });

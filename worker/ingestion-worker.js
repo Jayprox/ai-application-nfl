@@ -957,7 +957,26 @@ let highlightlyCooldownUntil = 0;
 // calls in just the early window -- ~1.4% of the new 7,500/day ceiling,
 // before sync_live_scores, sync_injury_reports, or the one-time match-id
 // lookups are even added in.
-const LIVE_STATS_INTERVAL_MINUTES = 30;
+//
+// CONFIRMED follow-up, 2026-09-17: the "nothing consumes a live box
+// score yet" reasoning above no longer holds -- GET /games/:gameId/
+// boxscore (backend/routes/games.js) now reads these same tables for
+// GameDetailPage.jsx's live box score / top performers section (see
+// docs/part2-roadmap.md's "fuller live gamecast view" backlog item).
+// Same "spend headroom where it actually shows in the product" call
+// LIVE_SCORE_INTERVAL_MINUTES's own 2026-09-15 cut already made for the
+// scoreboard. Tightened 30 -> 5min: 13 games x (240min / 5min) = 48
+// ticks/game x 13 ~= 624 calls in just the early window (~8% of the
+// 7,500/day ceiling); a full ~11h Sunday extrapolates to roughly 1,700
+// calls (~23% of the daily ceiling) -- still comfortable room left for
+// sync_live_scores and sync_injury_reports sharing the same budget. Not
+// cut all the way to sync_live_scores' 2min: unlike that job, this one
+// is NOT a single shared list call -- it's one /box-score/{id} call PER
+// live game, so cost scales with concurrent games in a way the
+// scoreboard job's doesn't; 5min keeps a comfortable multiple of margin
+// rather than chasing scoreboard-level freshness a box score doesn't
+// need to match.
+const LIVE_STATS_INTERVAL_MINUTES = 5;
 
 // sync_live_scores (below) is cheap by comparison: ONE /matches list
 // call covers every live game at once (confirmed 2026-09-14 against a

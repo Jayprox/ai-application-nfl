@@ -10,7 +10,7 @@ import InjuryBadge from '../components/InjuryBadge';
 /**
  * Game Detail page — the per-game deep dive (Part 2 Phase 3, scoped
  * 2026-09-14 via docs/part2-roadmap.md) that GameCard.jsx's cards on the
- * Games page now link to. Composes four routes rather than introducing
+ * Games page now link to. Composes five routes rather than introducing
  * any new data of its own — same "one source of truth, link out rather
  * than duplicate" principle backend/routes/games.js's own header comment
  * states and the rest of this app already follows:
@@ -18,14 +18,30 @@ import InjuryBadge from '../components/InjuryBadge';
  *   - GET /games/:gameId          — matchup header (backend/routes/games.js)
  *   - GET /edge/games/:gameId     — model-vs-market read (backend/lib/edge.js)
  *   - GET /odds/games/:id         — full odds board (backend/routes/odds.js)
- *   - GET /games/:gameId/injuries — both rosters' injury reports (new,
- *                                   same file as the first route above)
+ *   - GET /games/:gameId/injuries — both rosters' injury reports
+ *   - GET /games/:gameId/boxscore — live/final per-player stat lines
+ *                                   (new, 2026-09-17, "fuller live
+ *                                   gamecast view" backlog item — see
+ *                                   docs/part2-roadmap.md). Same
+ *                                   background-poll-while-in_progress
+ *                                   treatment as the header fetch below,
+ *                                   since a live box score is exactly
+ *                                   the kind of thing that goes stale
+ *                                   mid-page-view. Drive events
+ *                                   (play-by-play) are deliberately NOT
+ *                                   part of this — no confirmed data
+ *                                   source exists for them yet (neither
+ *                                   nflverse nor Highlightly's own
+ *                                   /matches/{id} detail response has
+ *                                   ever been confirmed to carry
+ *                                   play-level data), so this stays
+ *                                   scoreboard + box score only.
  *
  * Only the first fetch gates the page (a 404'd or bad game id really
- * means "there's nothing to show"). Edge/odds/injuries are treated as
- * secondary the same way GamesPage.jsx treats edge/odds on a card — a
- * slow or failed fetch just renders that section's own graceful-empty
- * state rather than blocking the header from showing.
+ * means "there's nothing to show"). Edge/odds/injuries/boxscore are
+ * treated as secondary the same way GamesPage.jsx treats edge/odds on a
+ * card — a slow or failed fetch just renders that section's own
+ * graceful-empty state rather than blocking the header from showing.
  */
 
 const MARKET_LABEL = { spreads: 'Spread', h2h: 'Moneyline', totals: 'Total' };
@@ -70,6 +86,186 @@ function formatPoint(n) {
   return num > 0 ? `+${num}` : `${num}`;
 }
 
+// Box score category configs — mirror the real position groupings
+// PLAYER_STAT_TABLES/PLAYER_STAT_COLUMNS use server-side
+// (backend/lib/stats-query.js), not a frontend-only invented split. Each
+// category's filterKeys decide which players are "in" that table (e.g. a
+// receiver with 0 rush attempts doesn't get a blank row in Rushing) —
+// same "don't show a row with nothing in it" norm PlayerDetailPage.jsx's
+// EmptyStatsMessage already follows for a whole page.
+const OFFENSE_CATEGORIES = [
+  {
+    key: 'passing',
+    label: 'Passing',
+    filterKeys: ['pass_attempts'],
+    columns: [
+      ['pass_completions', 'C'],
+      ['pass_attempts', 'ATT'],
+      ['passing_yards', 'YDS'],
+      ['passing_tds', 'TD'],
+      ['interceptions_thrown', 'INT'],
+    ],
+  },
+  {
+    key: 'rushing',
+    label: 'Rushing',
+    filterKeys: ['rush_attempts'],
+    columns: [
+      ['rush_attempts', 'ATT'],
+      ['rushing_yards', 'YDS'],
+      ['rushing_tds', 'TD'],
+      ['fumbles', 'FUM'],
+    ],
+  },
+  {
+    key: 'receiving',
+    label: 'Receiving',
+    filterKeys: ['targets', 'receptions'],
+    columns: [
+      ['receptions', 'REC'],
+      ['targets', 'TGT'],
+      ['receiving_yards', 'YDS'],
+      ['receiving_tds', 'TD'],
+    ],
+  },
+];
+
+const DEFENSE_CATEGORY = {
+  key: 'defense',
+  label: 'Defense',
+  filterKeys: [
+    'tackles_solo', 'tackles_assist', 'sacks', 'interceptions',
+    'passes_defended', 'forced_fumbles', 'fumble_recoveries', 'defensive_tds',
+  ],
+  columns: [
+    ['tackles_solo', 'SOLO'],
+    ['tackles_assist', 'AST'],
+    ['sacks', 'SACK'],
+    ['interceptions', 'INT'],
+    ['passes_defended', 'PD'],
+    ['forced_fumbles', 'FF'],
+    ['fumble_recoveries', 'FR'],
+    ['defensive_tds', 'TD'],
+  ],
+};
+
+const SPECIAL_TEAMS_CATEGORY = {
+  key: 'special_teams',
+  label: 'Special Teams',
+  filterKeys: ['fg_attempts', 'xp_attempts', 'punts', 'kick_return_yards', 'punt_return_yards'],
+  columns: [
+    ['fg_made', 'FG'],
+    ['fg_attempts', 'FGA'],
+    ['longest_fg', 'LNG'],
+    ['xp_made', 'XP'],
+    ['punts', 'PUNT'],
+    ['punt_avg', 'AVG'],
+    ['kick_return_yards', 'KR YDS'],
+    ['punt_return_yards', 'PR YDS'],
+    ['return_tds', 'TD'],
+  ],
+};
+
+function nonZeroRows(rows, filterKeys) {
+  return rows.filter((r) => filterKeys.some((k) => Number(r[k]) > 0));
+}
+
+// "Top performers" = the classic gamecast leaders pattern (a passing
+// leader, a rushing leader, a receiving leader per team), not a generic
+// top-N-by-yards list — comparing 300 pass yards against 80 rush yards
+// on one shared scale would be apples-to-oranges, so each category picks
+// its own leader instead.
+function topByStat(rows, statKey) {
+  return rows.reduce((best, r) => (Number(r[statKey]) > Number(best?.[statKey] ?? -1) ? r : best), null);
+}
+
+const LEADER_CATEGORIES = [
+  { label: 'Passing', statKey: 'passing_yards', tdKey: 'passing_tds' },
+  { label: 'Rushing', statKey: 'rushing_yards', tdKey: 'rushing_tds' },
+  { label: 'Receiving', statKey: 'receiving_yards', tdKey: 'receiving_tds' },
+];
+
+function teamLeaders(offenseRows) {
+  return LEADER_CATEGORIES.map(({ label, statKey, tdKey }) => {
+    const player = topByStat(offenseRows, statKey);
+    if (!player || Number(player[statKey]) <= 0) return null;
+    return { label, player, stat: player[statKey], td: player[tdKey] };
+  }).filter(Boolean);
+}
+
+function formatSyncedAt(freshness) {
+  const iso = freshness?.synced_at;
+  if (!iso) return null;
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function TopPerformers({ label, offenseRows }) {
+  const leaders = teamLeaders(offenseRows);
+  if (leaders.length === 0) return null;
+  return (
+    <div>
+      <h3 className="text-xs font-medium text-ink-dim mb-1.5">{label}</h3>
+      <ul className="space-y-1">
+        {leaders.map((l) => (
+          <li
+            key={l.label}
+            className="flex items-center justify-between gap-2 rounded-md border border-line bg-surface px-3 py-1.5 text-sm"
+          >
+            <span className="w-20 shrink-0 text-xs uppercase tracking-wide text-ink-faint">{l.label}</span>
+            <Link to={`/players/${l.player.player_id}`} className="flex-1 truncate text-link hover:underline">
+              {l.player.full_name}
+            </Link>
+            <span className="shrink-0 text-xs text-ink tabular-nums">
+              {l.stat} YDS{l.td ? `, ${l.td} TD` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function BoxScoreCategoryTable({ category, rows }) {
+  const filtered = nonZeroRows(rows, category.filterKeys);
+  if (filtered.length === 0) return null;
+  return (
+    <div className="mb-3">
+      <h4 className="mb-1 text-xs font-medium text-ink-dim">{category.label}</h4>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-ink-faint">
+              <th className="pb-1 text-left font-medium">Player</th>
+              {category.columns.map(([key, label]) => (
+                <th key={key} className="pb-1 pl-2 text-right font-medium tabular-nums">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r) => (
+              <tr key={r.player_id} className="border-t border-line">
+                <td className="py-1 pr-2">
+                  <Link to={`/players/${r.player_id}`} className="text-link hover:underline">
+                    {r.full_name}
+                  </Link>{' '}
+                  <span className="text-xs text-ink-faint">{r.position}</span>
+                </td>
+                {category.columns.map(([key]) => (
+                  <td key={key} className="py-1 pl-2 text-right text-ink tabular-nums">
+                    {r[key] ?? 0}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function GameDetailPage() {
   const { gameId } = useParams();
 
@@ -86,6 +282,11 @@ export default function GameDetailPage() {
   const { data: edgeData } = useApiFetch(`/edge/games/${gameId}`);
   const { data: oddsData } = useApiFetch(`/odds/games/${gameId}`);
   const { data: injuriesData } = useApiFetch(`/games/${gameId}/injuries`);
+  // Same livePollMs as the header fetch above -- a live box score goes
+  // stale on the same "game is in_progress" condition the score/clock
+  // do, so it reuses that state rather than deriving its own.
+  const { data: boxscoreData } = useApiFetch(`/games/${gameId}/boxscore`, { pollMs: livePollMs });
+  const [showFullBoxScore, setShowFullBoxScore] = useState(false);
 
   if (loading || error) {
     return <AsyncState loading={loading} error={error} loadingLabel="Loading game…" onRetry={refetch} />;
@@ -123,6 +324,10 @@ export default function GameDetailPage() {
 
   const homeInjuries = injuriesData?.data?.home ?? [];
   const awayInjuries = injuriesData?.data?.away ?? [];
+
+  const boxscore = boxscoreData?.data;
+  const boxscoreSampleSize = boxscoreData?.meta?.sample_size ?? 0;
+  const boxscoreSyncedAtLabel = formatSyncedAt(boxscoreData?.meta?.freshness);
 
   return (
     <div>
@@ -250,6 +455,57 @@ export default function GameDetailPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-2">Live Box Score</h2>
+          {!boxscore || boxscoreSampleSize === 0 ? (
+            <p className="text-sm text-ink-dim">
+              {game.status === 'scheduled'
+                ? 'Box score available once the game kicks off.'
+                : 'No box score synced yet for this game.'}
+            </p>
+          ) : (
+            <div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TopPerformers label={game.away_team_abbr} offenseRows={boxscore.away.offense} />
+                <TopPerformers label={game.home_team_abbr} offenseRows={boxscore.home.offense} />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowFullBoxScore((v) => !v)}
+                className="mt-3 text-sm text-ink-dim underline hover:text-ink"
+              >
+                {showFullBoxScore ? 'Hide full box score' : 'Show full box score'}
+              </button>
+
+              {showFullBoxScore && (
+                <div className="mt-3 grid gap-6 sm:grid-cols-2">
+                  {[
+                    { label: game.away_team_abbr, side: boxscore.away },
+                    { label: game.home_team_abbr, side: boxscore.home },
+                  ].map(({ label, side }) => (
+                    <div key={label}>
+                      <h3 className="mb-1.5 text-xs font-medium text-ink-dim">{label}</h3>
+                      {OFFENSE_CATEGORIES.map((cat) => (
+                        <BoxScoreCategoryTable key={cat.key} category={cat} rows={side.offense} />
+                      ))}
+                      <BoxScoreCategoryTable category={DEFENSE_CATEGORY} rows={side.defense} />
+                      <BoxScoreCategoryTable category={SPECIAL_TEAMS_CATEGORY} rows={side.special_teams} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {boxscoreSyncedAtLabel && (
+                <p className="mt-2 text-xs text-ink-faint">
+                  Box score as of {boxscoreSyncedAtLabel}
+                  {game.status === 'in_progress' ? ' — updates every few minutes while the game is live.' : ''}
+                </p>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </div>

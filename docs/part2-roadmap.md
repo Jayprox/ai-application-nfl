@@ -239,10 +239,31 @@ recent_form/role_trend.
   `useApiFetch.js` grew an opt-in `pollMs` param and a `silent` refetch
   mode so the score/clock updates in place without flashing the page's
   loading state on every tick.
-- Deliberately not done this round: a fuller live gamecast view (drive
-  events, top performers, live box score off Highlightly's
-  `/matches/{id}` detail endpoint) — backlogged; each detail call costs
-  its own quota unlike the batched `/matches` list this round reused.
+- **Top performers + live box score — done, 2026-09-17.** No new vendor
+  call needed here either, same story as the quarter/clock fields above:
+  `sync_live_stats` has polled Highlightly's `/box-score/{id}` every 30
+  minutes during live games since the live-scoring rollout and written
+  real per-player lines into `player_offense_game_stats`/`defense`/
+  `special_teams_game_stats` — `insights.js` stays gated to
+  `status='final'` for its own separate reason, but that gate never
+  applied to a raw box score, and until this nothing in the product
+  actually read those tables for a live game. New
+  `GET /games/:gameId/boxscore` (`backend/routes/games.js`) reads them
+  directly by `game_id` — a shape `POST /query`'s player/team+season-scoped
+  engine can't express — and `GameDetailPage.jsx` renders a passing/
+  rushing/receiving leader per team plus an expandable full box score.
+  `LIVE_STATS_INTERVAL_MINUTES` tightened 30 -> 5 now that this is a real
+  consumer, same "spend headroom where it shows in the product" call
+  `LIVE_SCORE_INTERVAL_MINUTES` already made 2026-09-15 — see that
+  constant's own comment in `worker/ingestion-worker.js` for the math.
+- Deliberately NOT done: drive events (play-by-play). Unlike the box
+  score above, this has no confirmed data source at all — nflverse is a
+  batch/historical export with no live feed, and the one Highlightly
+  detail endpoint this app has ever dry-run tested (`/matches/{id}`,
+  used for injuries) has only ever been confirmed to carry an
+  `.injuries` field; no play/drive field has ever actually been checked
+  for. Left in Backlog below pending real research rather than guessed
+  at.
 
 ---
 
@@ -432,6 +453,21 @@ not silently dropped" convention — these were previously sitting under
      `GamesPage`, `EdgePage`, `RankingsPage`, `PortfolioPage`,
      `PlayerBrowsePage`, and `ChatPage` were placeholder-only with no
      accessible name. Fixed with `aria-label` on each.
+- **Natural-language / StatMuse-style search bar — done, 2026-09-17.**
+  Extended the existing Chat agent (`backend/lib/orchestrator.js`) rather
+  than building a separate search UI or a parallel LLM system, per
+  explicit design-fork calls: a new `get_player_stats` tool for raw
+  season/last5/career/game_log lookups (backed by `POST /query`'s engine,
+  relocated into `lib/stats-query.js` so it can be called in-process), plus
+  a deterministic pre-LLM shortcut for obvious canonical questions so
+  they don't cost a Claude API call, falling through to the normal
+  tool-calling loop for anything less clear-cut. Verified live end-to-end
+  against real questions (season/career/last-5 lookups, plus an
+  ambiguous question correctly falling through to the LLM) before
+  calling it done.
+- **Top performers + live box score — done, 2026-09-17.** See the Phase 5
+  section above for the full writeup; noted here too since it was this
+  session's second backlog item shipped the same day as the search bar.
 
 ## Backlog
 
@@ -442,21 +478,20 @@ that used to sit here ("Phase 3 — scope and timing not yet decided") was
 deleted outright rather than moved: Phase 3 is marked "Status: done"
 above, so that line was simply stale, not a real open item.
 
-Ordered 2026-09-17 per explicit priority call:
+Ordered 2026-09-17 per explicit priority call. Items 1 and 2 as
+originally scoped (NL search bar; box score + top performers half of the
+live gamecast view) shipped this same day — see Resolved above.
 
-1. **Natural-language / StatMuse-style search bar.** Scoped out of Part
-   1's MVP on purpose (`docs/vibe-coding-checklist.md`'s Phase 3 backlog)
-   and still only "designed conceptually now, not yet scaffolded in code"
-   (`docs/architecture.md`'s NL query-layer note). Never built. **In
-   progress.**
-2. **Fuller live gamecast view** (drive events, top performers, a live
-   box score off Highlightly's `/matches/{id}` detail endpoint) — Phase 5
-   scoped this out on purpose since each detail call costs its own quota,
-   unlike the batched `/matches` list Phase 5 already reuses for the
-   scoreboard.
-3. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
-   API, no rework needed later." Last in line, after the above two are
-   done.
+1. **Drive events (play-by-play) for live games.** Split out from the
+   original "fuller live gamecast view" item once the box score/top-
+   performers half of it shipped (2026-09-17) — see Phase 5 above for
+   why this half is explicitly NOT scoped yet: no confirmed data source
+   exists. Needs real vendor research (either confirming Highlightly's
+   `/matches/{id}` response has something nobody's checked for, or
+   sourcing a different vendor entirely) before this can even be sized,
+   let alone built.
+2. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+   API, no rework needed later." Last in line, after the above is done.
 
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
