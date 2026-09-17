@@ -527,6 +527,19 @@ live gamecast view) shipped this same day — see Resolved above.
    let alone built.
 2. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
    API, no rework needed later." Last in line, after the above is done.
+3. **Delete 5 leftover Railway services.** Not urgent — dashboard
+   cleanup only, none of these affect the live app, so it sits outside
+   the priority ordering above rather than in it. Diagnostic/temp
+   services created during debugging sessions that `delete-service`
+   couldn't remove (the tool call times out at 180s, a known systemic
+   issue in this environment, not one-off): `claude-debug-stats-check`,
+   `claude-debug-user-count-check`, `claude-debug-nl-search-check`,
+   `claude-debug-season-total-check`. Plus one created by mistake during
+   the 2026-09-17 season_total/box-score verification pass —
+   `ai-application-nfl`, a stray full-repo clone triggered by calling
+   the wrong Railway tool while the MCP connection was reconnecting.
+   Delete all 5 manually from the Railway dashboard whenever
+   convenient.
 
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
