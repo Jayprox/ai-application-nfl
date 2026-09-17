@@ -1798,6 +1798,51 @@ function oddsApiUrl() {
   return `${ODDS_API_BASE}?${params.toString()}`;
 }
 
+// ---------------------------------------------------------------------
+// sync_player_props (2026-09-17, "let's explore adding Game and Player
+// props" request — see docs/part2-roadmap.md, 012_player_prop_odds.sql).
+// The bulk odds endpoint above only ever returns the "featured" markets
+// (h2h/spreads/totals) -- player markets only come back from The Odds
+// API's per-event endpoint, queried one game at a time. That's
+// meaningfully more expensive than sync_odds's single bulk call, so
+// this job deliberately stays narrow: the current week's games only (no
+// backfill, no running ahead), and a curated 5-market list rather than
+// every player market the vendor offers. Both the market list and the
+// schedule below are a starting point, not settled -- revisit once real
+// credit usage is visible.
+// ---------------------------------------------------------------------
+
+const PLAYER_PROP_EVENTS_URL = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events';
+const PLAYER_PROP_ODDS_BASE = 'https://api.the-odds-api.com/v4/sports/americanfootball_nfl/events';
+const PLAYER_PROP_MARKETS = [
+  'player_pass_yds',
+  'player_rush_yds',
+  'player_reception_yds',
+  'player_receptions',
+  'player_anytime_td',
+];
+
+// Free listing call (no markets, no odds, no credit cost per the
+// vendor's docs) -- used purely to get the vendor's own event id per
+// game, which the per-event odds endpoint below requires. Each entry
+// still carries home_team/away_team names + commence_time, so
+// findGameForOddsEntry() below (same helper sync_odds already uses)
+// resolves it to our own game_id the same way.
+function playerPropEventsUrl() {
+  const params = new URLSearchParams({ apiKey: process.env.ODDS_API_KEY });
+  return `${PLAYER_PROP_EVENTS_URL}?${params.toString()}`;
+}
+
+function playerPropOddsUrl(eventId) {
+  const params = new URLSearchParams({
+    apiKey: process.env.ODDS_API_KEY,
+    regions: 'us',
+    markets: PLAYER_PROP_MARKETS.join(','),
+    oddsFormat: 'american',
+  });
+  return `${PLAYER_PROP_ODDS_BASE}/${eventId}/odds?${params.toString()}`;
+}
+
 // Resolves one odds-API game entry (home_team/away_team names +
 // commence_time) to our own game_id. Matches on team pair + a ±1-day
 // window around commence_time rather than an exact timestamp match, since
@@ -1941,6 +1986,185 @@ async function syncOdds() {
   }
 
   console.log(`[job:sync_odds] ${inserted} odds row(s) recorded across ${entries.length} game(s) from the vendor${skipped ? ` (${skipped} row(s) skipped)` : ''}`);
+  return { recordsProcessed: inserted };
+}
+
+// Duplicated from backend/lib/current-week.js rather than shared: this
+// worker is its own Railway service (rootDirectory: worker, see
+// worker/package.json) with no access to backend/lib at deploy time, and
+// it already talks to Postgres via its own `pool` (not backend/db.js's
+// `query` wrapper) -- same reasoning as every other query in this file.
+// Same "nearest upcoming game, else most recent" logic as the original.
+async function getCurrentWeekForProps() {
+  const { rows: upcoming } = await pool.query(
+    `SELECT season, week FROM games WHERE status = 'scheduled' ORDER BY game_datetime ASC LIMIT 1`
+  );
+  if (upcoming[0]) return upcoming[0];
+  const { rows: latest } = await pool.query(`SELECT season, week FROM games ORDER BY game_datetime DESC LIMIT 1`);
+  return latest[0] || null;
+}
+
+// Prop player resolution: unlike resolveIdentity(), this does NOT insert
+// a new players row on an ambiguous/missing name match -- same "skip
+// rather than guess" norm as resolvePlayerForBoxScore() above, for the
+// same reason: The Odds API's player-prop outcomes carry only a name
+// string (via each outcome's `description` field), no position and no
+// team, so there's nothing to safely seed a new row with. Matched
+// against BOTH teams in the game (not one specific team_id) since the
+// vendor doesn't say which side a prop's player is on either -- only
+// resolveIdentity()'s box-score cousin knows the team per row, because
+// that vendor (Highlightly) does report it.
+async function resolvePlayerForProp(fullName, homeTeamId, awayTeamId, cache) {
+  const sourcePlayerId = `${fullName}|${homeTeamId}|${awayTeamId}`;
+  if (cache.has(sourcePlayerId)) return cache.get(sourcePlayerId);
+
+  const { rows: crosswalked } = await pool.query(
+    `SELECT player_id FROM player_id_crosswalk WHERE source = 'the-odds-api' AND source_player_id = $1`,
+    [sourcePlayerId]
+  );
+  if (crosswalked.length) {
+    cache.set(sourcePlayerId, crosswalked[0].player_id);
+    return crosswalked[0].player_id;
+  }
+
+  const { rows: matches } = await pool.query(
+    `SELECT player_id FROM players WHERE lower(full_name) = lower($1) AND current_team_id IN ($2, $3) LIMIT 2`,
+    [fullName, homeTeamId, awayTeamId]
+  );
+  if (matches.length !== 1) {
+    console.warn(
+      `[job:sync_player_props] ${matches.length === 0 ? 'no' : 'ambiguous'} player match for "${fullName}" (teams ${homeTeamId}/${awayTeamId}) — skipping this prop`
+    );
+    cache.set(sourcePlayerId, null);
+    return null;
+  }
+
+  const playerId = matches[0].player_id;
+  await pool.query(
+    `INSERT INTO player_id_crosswalk (player_id, source, source_player_id, match_confidence)
+     VALUES ($1, 'the-odds-api', $2, 'matched') ON CONFLICT (source, source_player_id) DO NOTHING`,
+    [playerId, sourcePlayerId]
+  );
+  cache.set(sourcePlayerId, playerId);
+  return playerId;
+}
+
+// Groups one player-prop market's outcomes by player name into the
+// paired over/under (or yes/no) row shape player_prop_odds stores --
+// same idea as extractMarketRow() above for game_odds, just keyed by
+// player name (each outcome's `description` field) instead of a fixed
+// home/away side. player_anytime_td has no line/point at all (a Yes/No
+// prop, not Over/Under) -- see 012_player_prop_odds.sql's header for why
+// overPrice/underPrice are reused to hold the Yes/No prices for that one
+// market rather than adding two more columns for it alone.
+function extractPlayerPropRows(market) {
+  const byPlayer = new Map();
+  for (const o of market.outcomes || []) {
+    const name = o.description;
+    if (!name) continue;
+    if (!byPlayer.has(name)) byPlayer.set(name, { playerName: name });
+    const row = byPlayer.get(name);
+    if (market.key === 'player_anytime_td') {
+      if (o.name === 'Yes') row.overPrice = o.price;
+      else if (o.name === 'No') row.underPrice = o.price;
+    } else if (o.name === 'Over') {
+      row.overPrice = o.price;
+      row.line = o.point;
+    } else if (o.name === 'Under') {
+      row.underPrice = o.price;
+      row.line = o.point;
+    }
+  }
+  return [...byPlayer.values()];
+}
+
+async function syncPlayerProps() {
+  if (!process.env.ODDS_API_KEY) {
+    console.warn('[job:sync_player_props] ODDS_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+
+  const current = await getCurrentWeekForProps();
+  if (!current) {
+    console.warn('[job:sync_player_props] no current week resolved — skipping');
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: weekGames } = await pool.query(
+    `SELECT game_id, home_team_id, away_team_id FROM games WHERE season = $1 AND week = $2`,
+    [current.season, current.week]
+  );
+  if (weekGames.length === 0) {
+    console.log('[job:sync_player_props] no games scheduled for the current week — nothing to sync');
+    return { recordsProcessed: 0 };
+  }
+  const gameById = new Map(weekGames.map((g) => [g.game_id, g]));
+
+  let events;
+  try {
+    const text = await fetchText(playerPropEventsUrl());
+    events = JSON.parse(text);
+  } catch (err) {
+    console.warn(`[job:sync_player_props] events fetch failed (${err.message})`);
+    return { recordsProcessed: 0 };
+  }
+  if (!Array.isArray(events)) {
+    console.warn(`[job:sync_player_props] unexpected events response (not an array), skipping this run: ${JSON.stringify(events).slice(0, 500)}`);
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: teams } = await pool.query('SELECT team_id, name FROM teams');
+  const teamIdByName = {};
+  for (const t of teams) teamIdByName[t.name] = t.team_id;
+  const gameCache = new Map();
+  const playerCache = new Map();
+
+  let inserted = 0;
+  let skipped = 0;
+  let eventsQueried = 0;
+
+  for (const event of events) {
+    const gameId = await findGameForOddsEntry(event, teamIdByName, gameCache);
+    if (!gameId || !gameById.has(gameId)) continue; // not one of this week's games — out of scope for now
+    const game = gameById.get(gameId);
+    eventsQueried++;
+
+    let oddsPayload;
+    try {
+      const text = await fetchText(playerPropOddsUrl(event.id));
+      oddsPayload = JSON.parse(text);
+    } catch (err) {
+      console.warn(`[job:sync_player_props] odds fetch failed for event ${event.id} (${gameId}): ${err.message}`);
+      continue;
+    }
+
+    for (const bookmaker of oddsPayload.bookmakers || []) {
+      for (const market of bookmaker.markets || []) {
+        if (!PLAYER_PROP_MARKETS.includes(market.key)) continue;
+        for (const row of extractPlayerPropRows(market)) {
+          const playerId = await resolvePlayerForProp(row.playerName, game.home_team_id, game.away_team_id, playerCache);
+          if (!playerId) {
+            skipped++;
+            continue;
+          }
+          try {
+            await pool.query(
+              `INSERT INTO player_prop_odds (
+                 game_id, player_id, bookmaker, market, line, over_price, under_price, bookmaker_last_update
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+              [gameId, playerId, bookmaker.key, market.key, n(row.line), n(row.overPrice), n(row.underPrice), bookmaker.last_update || null]
+            );
+            inserted++;
+          } catch (err) {
+            skipped++;
+            console.warn(`[job:sync_player_props] skipping one row (${gameId}/${bookmaker.key}/${market.key}/${row.playerName}): ${err.message}`);
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[job:sync_player_props] ${inserted} prop row(s) recorded across ${eventsQueried} game(s) from the vendor${skipped ? ` (${skipped} row(s) skipped)` : ''}`);
   return { recordsProcessed: inserted };
 }
 
@@ -2176,6 +2400,24 @@ const JOBS = {
       ],
     },
     run: syncOdds,
+  },
+  sync_player_props: {
+    source: 'the-odds-api',
+    // Deliberately coarser cadence than sync_odds above -- this job
+    // queries the vendor once PER GAME (the per-event endpoint), not
+    // once for the whole slate, so it costs meaningfully more credits
+    // per run. Revisit this schedule (and PLAYER_PROP_MARKETS' size)
+    // once real credit usage is visible — not settled yet, see
+    // 012_player_prop_odds.sql's header.
+    schedule: {
+      type: 'proximity',
+      buckets: [
+        { hoursBefore: 72, intervalMinutes: 720 },
+        { hoursBefore: 24, intervalMinutes: 180 },
+        { hoursBefore: 0, intervalMinutes: 60 },
+      ],
+    },
+    run: syncPlayerProps,
   },
   grade_picks: {
     source: 'internal', // grades our own picks_log against our own games/stats — no vendor call

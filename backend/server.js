@@ -20,6 +20,7 @@ const playerRoutes = require('./routes/players');
 const queryRoutes = require('./routes/query');
 const insightsRoutes = require('./routes/insights');
 const oddsRoutes = require('./routes/odds');
+const propsRoutes = require('./routes/props');
 const picksRoutes = require('./routes/picks');
 const matchupScoresRoutes = require('./routes/matchup-scores');
 const rankingsRoutes = require('./routes/rankings');
@@ -94,6 +95,14 @@ app.use('/insights', insightsRoutes);
 // routes/odds.js for why this is its own route rather than folded into
 // /query or /insights.
 app.use('/odds', oddsRoutes);
+// Player prop lines (2026-09-17, docs/part2-roadmap.md) — The Odds
+// API's per-event endpoint via worker's sync_player_props job, joined
+// with real recent-form context and a deterministic (not predictive)
+// lean. See routes/props.js for why this stays separate from /odds
+// (different vendor endpoint, player-scoped not game-scoped) and from
+// /insights (props need a market line to compare against, insights
+// never do).
+app.use('/props', propsRoutes);
 // Calibration/tracking layer (Part 2 Phase 2, "3 paths" discussion) — the
 // picks_log read view. See routes/picks.js and worker/ingestion-worker.js's
 // grade_picks job for the write path.

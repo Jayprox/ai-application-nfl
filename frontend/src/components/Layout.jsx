@@ -31,6 +31,7 @@ const RESEARCH_ITEMS = [
 ];
 const AGENTS_ITEMS = [
   { to: '/rankings', label: 'Rankings' },
+  { to: '/props', label: 'Props' },
   { to: '/edge', label: 'Edge' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/chat', label: 'Chat' },
