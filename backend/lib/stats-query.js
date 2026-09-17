@@ -319,4 +319,5 @@ module.exports = {
   PLAYER_STAT_COLUMNS,
   TEAM_STAT_COLUMNS,
   CAREER_AGGREGATE_OVERRIDE,
+  careerAggFn,
 };

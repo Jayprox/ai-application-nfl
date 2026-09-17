@@ -36,6 +36,24 @@ import InjuryBadge from '../components/InjuryBadge';
  *                                   ever been confirmed to carry
  *                                   play-level data), so this stays
  *                                   scoreboard + box score only.
+ *   - GET /games/:gameId/player-stats — both rosters' SEASON stats (not
+ *                                   this-game stats), for the new Player
+ *                                   Stats section below. No pollMs — a
+ *                                   season aggregate doesn't go stale
+ *                                   mid-page-view the way a live score
+ *                                   does.
+ *
+ * Player Stats section (2026-09-17, "I wanted to see the players stats,
+ * and we can create a toggle to switch between the two teams" request):
+ * a new, always-visible section, separate from Live Box Score above —
+ * that section only has data once a game has kicked off, which is
+ * exactly the case (a scheduled, upcoming game) this one exists for.
+ * Reuses ALL_BOX_SCORE_CATEGORIES and BoxScoreCategoryTable unchanged
+ * from the box score rework — same category/column shape, just fed a
+ * different rows array — plus its own independent away/home toggle (a
+ * separate activeSide would collide with Live Box Score's) and a second
+ * small Season Avg / Season Total toggle, since GET /player-stats
+ * returns both per category rather than picking one.
  *
  * Only the first fetch gates the page (a 404'd or bad game id really
  * means "there's nothing to show"). Edge/odds/injuries/boxscore are
@@ -347,6 +365,12 @@ export default function GameDetailPage() {
   // do, so it reuses that state rather than deriving its own.
   const { data: boxscoreData } = useApiFetch(`/games/${gameId}/boxscore`, { pollMs: livePollMs });
   const [activeSide, setActiveSide] = useState('away');
+  // Player Stats section's own toggles — deliberately separate state
+  // from Live Box Score's activeSide above, since a reader may well
+  // want the box score on one team and the season stats on the other.
+  const { data: playerStatsData } = useApiFetch(`/games/${gameId}/player-stats`);
+  const [playerStatsSide, setPlayerStatsSide] = useState('away');
+  const [playerStatsMode, setPlayerStatsMode] = useState('avg');
 
   if (loading || error) {
     return <AsyncState loading={loading} error={error} loadingLabel="Loading game…" onRetry={refetch} />;
@@ -389,6 +413,12 @@ export default function GameDetailPage() {
   const boxscoreSampleSize = boxscoreData?.meta?.sample_size ?? 0;
   const boxscoreSyncedAtLabel = formatSyncedAt(boxscoreData?.meta?.freshness);
   const activeBoxscoreSide = boxscore ? (activeSide === 'away' ? boxscore.away : boxscore.home) : null;
+
+  const playerStats = playerStatsData?.data;
+  const playerStatsSampleSize = playerStatsData?.meta?.sample_size ?? 0;
+  const activePlayerStatsSide = playerStats
+    ? (playerStatsSide === 'away' ? playerStats.away : playerStats.home)
+    : null;
 
   return (
     <div>
@@ -516,6 +546,61 @@ export default function GameDetailPage() {
               </div>
             ))}
           </div>
+        </section>
+
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-2">Player Stats</h2>
+          {!playerStats || playerStatsSampleSize === 0 ? (
+            <p className="text-sm text-ink-dim">No stats synced yet this season for either roster.</p>
+          ) : (
+            <div>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex max-w-xs rounded-md border border-line bg-surface p-0.5">
+                  {[
+                    { key: 'away', abbr: game.away_team_abbr },
+                    { key: 'home', abbr: game.home_team_abbr },
+                  ].map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setPlayerStatsSide(t.key)}
+                      className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+                        playerStatsSide === t.key ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
+                      }`}
+                    >
+                      {t.abbr}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex rounded-md border border-line bg-surface p-0.5 text-xs">
+                  {[
+                    { key: 'avg', label: 'Season Avg' },
+                    { key: 'total', label: 'Season Total' },
+                  ].map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => setPlayerStatsMode(m.key)}
+                      className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                        playerStatsMode === m.key ? 'bg-accent text-on-accent' : 'text-ink-dim hover:bg-surface-2'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {ALL_BOX_SCORE_CATEGORIES.map((cat) => (
+                <BoxScoreCategoryTable
+                  key={cat.key}
+                  category={cat}
+                  rows={activePlayerStatsSide[cat.group][playerStatsMode]}
+                />
+              ))}
+            </div>
+          )}
         </section>
 
         <section>

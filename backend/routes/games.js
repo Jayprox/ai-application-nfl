@@ -47,6 +47,31 @@
  *                              hasn't kicked off yet — same "don't fake
  *                              it, show a graceful empty state" norm as
  *                              the rest of this app.
+ * GET /games/:gameId/player-stats — both rosters' SEASON stats (not
+ *                              this-game stats), split into { home, away }
+ *                              and grouped into { offense, defense,
+ *                              special_teams } same shape as boxscore
+ *                              above, but each category carries both
+ *                              { avg, total } row sets rather than one
+ *                              (2026-09-17, "let me see player stats on
+ *                              a scheduled game, with a team toggle"
+ *                              request — see docs/part2-roadmap.md).
+ *                              GameDetailPage.jsx's Live Box Score
+ *                              section only has something to show once a
+ *                              game has kicked off; this route exists
+ *                              precisely for the case that leaves empty
+ *                              — an upcoming game where the two teams
+ *                              already have a season's worth of games on
+ *                              record. One query per stat table (not
+ *                              per-player — same "no player_id to scope
+ *                              by up front" reasoning as boxscore above),
+ *                              filtered to this game's season and both
+ *                              team ids, aggregating AVG and
+ *                              careerAggFn()-aware SUM (reusing
+ *                              lib/stats-query.js's own season/
+ *                              season_total math exactly, not a
+ *                              reimplementation) in the same statement so
+ *                              each row already carries both.
  *
  * This is the "front door" data source for Part 2 Phase 3's Games/Slate
  * page (docs/part2-roadmap.md) — a sportsbook-scoreboard-style week view
@@ -80,7 +105,7 @@
 const express = require('express');
 const { query } = require('../db');
 const { getCurrentWeek } = require('../lib/current-week');
-const { PLAYER_STAT_TABLES, PLAYER_STAT_COLUMNS } = require('../lib/stats-query');
+const { PLAYER_STAT_TABLES, PLAYER_STAT_COLUMNS, careerAggFn } = require('../lib/stats-query');
 
 const router = express.Router();
 
@@ -284,6 +309,89 @@ router.get('/:gameId/boxscore', async (req, res) => {
   } catch (err) {
     if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
     console.error('[routes/games] boxscore lookup failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/:gameId/player-stats — see header comment above. Groups by
+// player, computing AVG (this-season average, same math as the "season"
+// scope in lib/stats-query.js) and careerAggFn()-aware SUM (same math as
+// the "season_total" scope) in one query per stat table, so each raw
+// row already carries both an avg and a total value (total_<column>)
+// without a second pass over the tables. pickRows() below reshapes that
+// into the { avg: [...], total: [...] } pair per category the frontend
+// switches between.
+function pickRows(rawRows, teamId, columns, mode) {
+  return rawRows
+    .filter((r) => r.team_id === teamId)
+    .map((r) => {
+      const out = {
+        player_id: r.player_id,
+        team_id: r.team_id,
+        full_name: r.full_name,
+        position: r.position,
+        games_played: r.games_played,
+      };
+      for (const c of columns) out[c] = mode === 'avg' ? r[c] : r[`total_${c}`];
+      return out;
+    });
+}
+
+router.get('/:gameId/player-stats', async (req, res) => {
+  const { gameId } = req.params;
+  try {
+    const { rows: gameRows } = await query(
+      `SELECT home_team_id, away_team_id, season FROM games WHERE game_id = $1`,
+      [gameId]
+    );
+    const game = gameRows[0];
+    if (!game) return res.status(404).json({ error: 'game not found' });
+
+    const rowsByGroup = {};
+    let totalRows = 0;
+    for (const [group, table] of Object.entries(PLAYER_STAT_TABLES)) {
+      const columns = PLAYER_STAT_COLUMNS[group];
+      const avgSelects = columns.map((c) => `AVG(stats.${c})::float8 AS ${c}`);
+      const totalSelects = columns.map((c) => `${careerAggFn(c)}(stats.${c})::float8 AS total_${c}`);
+      const { rows } = await query(
+        `SELECT stats.player_id, stats.team_id, p.full_name, p.position,
+                COUNT(*)::int AS games_played,
+                ${avgSelects.join(', ')}, ${totalSelects.join(', ')}
+         FROM ${table} stats
+         JOIN games g ON g.game_id = stats.game_id
+         JOIN players p ON p.player_id = stats.player_id
+         WHERE stats.team_id IN ($1, $2) AND g.season = $3
+         GROUP BY stats.player_id, stats.team_id, p.full_name, p.position
+         ORDER BY p.full_name`,
+        [game.home_team_id, game.away_team_id, game.season]
+      );
+      rowsByGroup[group] = rows;
+      totalRows += rows.length;
+    }
+
+    const forTeam = (teamId) => ({
+      offense: {
+        avg: pickRows(rowsByGroup.offense, teamId, PLAYER_STAT_COLUMNS.offense, 'avg'),
+        total: pickRows(rowsByGroup.offense, teamId, PLAYER_STAT_COLUMNS.offense, 'total'),
+      },
+      defense: {
+        avg: pickRows(rowsByGroup.defense, teamId, PLAYER_STAT_COLUMNS.defense, 'avg'),
+        total: pickRows(rowsByGroup.defense, teamId, PLAYER_STAT_COLUMNS.defense, 'total'),
+      },
+      special_teams: {
+        avg: pickRows(rowsByGroup.special_teams, teamId, PLAYER_STAT_COLUMNS.special_teams, 'avg'),
+        total: pickRows(rowsByGroup.special_teams, teamId, PLAYER_STAT_COLUMNS.special_teams, 'total'),
+      },
+    });
+
+    const freshness = await getFreshness('sync_historical_stats');
+    res.json({
+      data: { home: forTeam(game.home_team_id), away: forTeam(game.away_team_id) },
+      meta: { sample_size: totalRows, freshness },
+    });
+  } catch (err) {
+    if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
+    console.error('[routes/games] player-stats lookup failed:', err);
     res.status(500).json({ error: 'internal error' });
   }
 });
