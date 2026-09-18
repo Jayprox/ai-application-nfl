@@ -660,14 +660,14 @@ drafting the iOS app is the last thing in this list, not the first.
    needs its own storage shape (one row per line, not per bookmaker) and
    probably its own UI (a line picker, not just another list entry).
    Real scoping work, not a quick extension of #3.
-5. **Additional player-prop markets beyond the 5 launch markets.** The
-   Odds API offers more player markets than `PLAYER_PROP_MARKETS`
-   currently pulls (e.g. pass attempts/completions/interceptions,
-   longest reception, sacks) — deliberately curated narrow at launch
-   (see `sync_player_props`'s own header comment in
-   `worker/ingestion-worker.js`) to bound API credit cost before real
-   usage was visible. Worth revisiting now that Player Props has run
-   through a real live game.
+5. **Additional player-prop markets beyond the 5 launch markets —
+   decided against, closed 2026-09-18.** The Odds API offers more player
+   markets than `PLAYER_PROP_MARKETS` currently pulls (e.g. pass
+   attempts/completions/interceptions, longest reception, sacks), and
+   this item asked whether to add them now that Player Props has run
+   through a real live game. Explicit call: the 5 launch markets are
+   enough — not pursuing this. `PLAYER_PROP_MARKETS` stays as-is;
+   revisit only if a real need for a specific market comes up later.
 6. **`sync_player_props`/`sync_odds` credit-usage check — done
    2026-09-18.** Checked live before building #3 above (its own header
    comment flagged this as "a starting point, not settled — revisit once
