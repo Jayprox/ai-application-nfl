@@ -298,6 +298,81 @@ recent_form/role_trend.
 
 ---
 
+## Part 2, Phase 6 — Player Props
+
+**Status: done, closed 2026-09-18.** Requested as "let's explore adding
+Game and Player props," inspired by a Chalk That MLB props Board
+screenshot. Player props only for this phase — Game props (team totals,
+alt lines) is a deliberate, scoped-out follow-up, see Backlog below.
+
+- **Backend, worker sync, and the Props board page — done, 2026-09-17**
+  (commit `9dd9ef5`). New append-only `player_prop_odds` table
+  (`db/migrations/012_player_prop_odds.sql`, 5 launch markets:
+  `player_pass_yds`, `player_rush_yds`, `player_reception_yds`,
+  `player_receptions`, `player_anytime_td`); new `sync_player_props`
+  worker job pulling from The Odds API's per-event endpoint (the bulk
+  endpoint `sync_odds` uses only carries featured markets), scoped to
+  the current week's games to bound API credit cost; new
+  `GET /props/players` route joining each line with the player's real
+  last-5-game average (reusing `lib/stats-query.js`) and computing a
+  deterministic lean (over/under/toss-up) — same "no predictive
+  calculations" principle the rest of Part 1 follows, not a confidence
+  score; new `PropsPage.jsx`, market tabs grouped by this week's games.
+- **James Cook / suffix-mismatch box-score bug — found and fixed,
+  2026-09-18** (commit `ceb7f42`, backfilled live). Highlightly reported
+  a live game's James Cook as "James Cook III"; our own roster has him
+  as plain "James Cook" — `resolvePlayerForBoxScore()`'s exact-match-only
+  comparison silently dropped his whole box-score line every poll tick.
+  Fixed with a `stripGenerationalSuffix()` fallback (tried only on a
+  genuine zero-match, never to resolve an ambiguity) and backfilled the
+  one already-missed game directly against production. Same tick's logs
+  also flagged Joshua Palmer/TJ Parker/Tommy Doman Jr./Mike Danna/DJ
+  Wonnum as unmatched — worth another look (see Backlog: a sibling
+  function turned out to have the identical gap, below).
+- **Final-game grading — done, 2026-09-18** (commit `e611128`), same
+  pattern `OddsBadge.jsx` already established for game-level odds ("lock
+  the values when the game starts... then show what did hit"). Backend
+  hands over the player's real per-game stat value once the game is
+  final (`final_value`); frontend derives the label/color — same
+  division of labor as `OddsBadge`, kept out of `picks_log`/`grade_picks`
+  since a prop board entry isn't a user's pick, it's the market's own
+  line.
+- **DraftKings-only default — done, 2026-09-18** (commit `67666b5`).
+  Requested as "switch it to the default, DraftKings." Root-caused a
+  real pre-existing bug while implementing it, not just a preference
+  change: the original `BOOKMAKER_ORDER` preference-list approach used
+  `indexOf()` comparison, and any bookmaker NOT in that list (the
+  vendor's real `betonlineag`/`betrivers`/`fanatics` keys, never added)
+  resolved to `indexOf() === -1` — numerically lower than every real
+  list index, so an unlisted book always won over the intended order,
+  which is why the board was showing `betonlineag` instead of any
+  preferred book. Replaced with a direct DraftKings filter (confirmed
+  full coverage across all 5 launch markets before shipping) — same
+  single-bookmaker, no-cross-book-fallback convention `OddsBadge.jsx`
+  already used for game odds.
+- **Final-grading NULL/COALESCE bug — found and fixed, 2026-09-18**
+  (commit `c6affb2`). Reported as "the TOSS-UP badges never finalize."
+  `final_value` treated a box-score row's NULL stat column the same as
+  "we don't know," when it actually meant the player recorded a genuine
+  zero. CONFIRMED against Highlightly's real box score for two
+  independent players (TE Brock Wright, WR DJ Moore, both zero-target
+  games): the vendor omits an entire stat group (Passing/Rushing/
+  Receiving/General) for a player who recorded nothing in it, rather
+  than reporting an explicit 0. The `player_anytime_td` branch already
+  `COALESCE`d correctly for this reason — brought the other 4 markets in
+  line with it. A genuinely void case (no box-score row at all) still
+  renders its own neutral "Void" badge rather than ever falling back to
+  the pregame `LeanBadge`.
+- **Badge color-by-direction — done, 2026-09-18** (commit `4604e71`).
+  Reported as "Unders showing green is confusing." Every real final
+  grade previously shared one positive/green token regardless of
+  direction; `GRADE_VARIANT` now colors over/scored green and under/
+  no-TD red (push/void stay neutral gray) — same over-vs-under
+  convention `LEAN_BADGE` already used pregame, carried through to the
+  final grade.
+
+---
+
 ## Open decisions — resolved
 
 Both items this roadmap originally left open are now settled by what
@@ -507,17 +582,45 @@ not silently dropped" convention — these were previously sitting under
 ## Backlog
 
 Work that was explicitly scoped out of the plan rather than just
-not-yet-verified — gathered here (2026-09-17) so it's reviewable as one
-list instead of scattered across Part 1/Part 2 history. The stray line
-that used to sit here ("Phase 3 — scope and timing not yet decided") was
-deleted outright rather than moved: Phase 3 is marked "Status: done"
-above, so that line was simply stale, not a real open item.
+not-yet-verified — gathered here (2026-09-17, updated 2026-09-18 at
+Player Props phase close-out) so it's reviewable as one list instead of
+scattered across Part 1/Part 2 history. The stray line that used to sit
+here ("Phase 3 — scope and timing not yet decided") was deleted outright
+rather than moved: Phase 3 is marked "Status: done" above, so that line
+was simply stale, not a real open item.
 
-Ordered 2026-09-17 per explicit priority call. Items 1 and 2 as
-originally scoped (NL search bar; box score + top performers half of the
-live gamecast view) shipped this same day — see Resolved above.
+Re-ordered 2026-09-18: the Swift iOS app is next up per explicit
+direction ("after this phase we can work on a draft to bring over to a
+chat for the Chalk That NFL iOS app") — moved to the top of the ordered
+list. Everything else below it is real, scoped, and reviewable, but not
+next in line.
 
-1. **Drive events (play-by-play) for live games.** Split out from the
+1. **Swift iOS app.** Next up. Also Part 1 MVP backlog — "web ships
+   first, same API, no rework needed later." The API surface (`/query`,
+   `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
+   `/picks`, chat) is the same one a native client would call; no
+   backend rework anticipated before drafting the iOS plan.
+2. **`resolvePlayerForProp()` has no suffix-normalization fallback —
+   found 2026-09-18, not yet fixed.** CONFIRMED via real
+   `sync_player_props` production logs (2026-09-18): real players with a
+   generational suffix mismatch between The Odds API's naming and our
+   roster are being silently dropped from Player Props — same bug class
+   as the James Cook box-score fix above (`ceb7f42`), but that fix only
+   landed in `resolvePlayerForBoxScore()`; its sibling
+   `resolvePlayerForProp()` (same file, used by `sync_player_props`)
+   still does a plain exact-match comparison with no
+   `stripGenerationalSuffix()` fallback. Real players confirmed dropped
+   in one day's logs: Brian Thomas Jr, Kevin Coleman Jr., Mike Washington
+   Jr., Montorie Foster Jr. — likely others across a full slate.
+   **Not a bug, for contrast:** most of that same log's "no player
+   match" lines are expected, not a defect — The Odds API's
+   `player_anytime_td` market includes team-defense outcomes ("Kansas
+   City Chiefs D/ST") and a synthetic "No Scorer" outcome alongside real
+   players, none of which have (or should have) a `players` row;
+   `resolvePlayerForProp()` correctly skips them rather than guessing.
+   Small, well-scoped, same fix shape as the already-shipped one —
+   reasonable to pull off the backlog and fix directly rather than wait.
+3. **Drive events (play-by-play) for live games.** Split out from the
    original "fuller live gamecast view" item once the box score/top-
    performers half of it shipped (2026-09-17) — see Phase 5 above for
    why this half is explicitly NOT scoped yet: no confirmed data source
@@ -525,21 +628,44 @@ live gamecast view) shipped this same day — see Resolved above.
    `/matches/{id}` response has something nobody's checked for, or
    sourcing a different vendor entirely) before this can even be sized,
    let alone built.
-2. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
-   API, no rework needed later." Last in line, after the above is done.
-3. **Delete 5 leftover Railway services.** Not urgent — dashboard
-   cleanup only, none of these affect the live app, so it sits outside
-   the priority ordering above rather than in it. Diagnostic/temp
+4. **Game props (team totals, alt lines).** The deliberate follow-up
+   noted in Player Props' own original commit message (`9dd9ef5`,
+   2026-09-17) — same `game_odds` pattern `sync_odds`/`routes/odds.js`
+   already use, extended to alt lines/team totals rather than just the
+   featured h2h/spread/total market. Not started; Player Props (this
+   phase) came first on purpose.
+5. **Additional player-prop markets beyond the 5 launch markets.** The
+   Odds API offers more player markets than `PLAYER_PROP_MARKETS`
+   currently pulls (e.g. pass attempts/completions/interceptions,
+   longest reception, sacks) — deliberately curated narrow at launch
+   (see `sync_player_props`'s own header comment in
+   `worker/ingestion-worker.js`) to bound API credit cost before real
+   usage was visible. Worth revisiting now that Player Props has run
+   through a real live game.
+6. **`sync_player_props` credit-usage check.** Its own header comment
+   already flags this as "a starting point, not settled — revisit once
+   real credit usage is visible." That real usage is visible now (this
+   phase shipped and ran through DET@BUF 2026-09-18) — worth an actual
+   check of The Odds API's remaining monthly credits against
+   `sync_odds`'s existing budget before either scaling up markets (#5)
+   or adding Game props (#4), both of which would add more per-event
+   calls on top of this job's existing one-call-per-game-per-week cost.
+7. **Delete 5 leftover Railway services.** Not urgent — dashboard
+   cleanup only, none of these affect the live app. Diagnostic/temp
    services created during debugging sessions that `delete-service`
    couldn't remove (the tool call times out at 180s, a known systemic
-   issue in this environment, not one-off): `claude-debug-stats-check`,
-   `claude-debug-user-count-check`, `claude-debug-nl-search-check`,
-   `claude-debug-season-total-check`. Plus one created by mistake during
-   the 2026-09-17 season_total/box-score verification pass —
-   `ai-application-nfl`, a stray full-repo clone triggered by calling
-   the wrong Railway tool while the MCP connection was reconnecting.
-   Delete all 5 manually from the Railway dashboard whenever
-   convenient.
+   issue in this environment, not one-off — **re-confirmed 2026-09-18**,
+   same timeout on the same tool call, service still present
+   afterward): `claude-debug-stats-check`, `claude-debug-user-count-check`,
+   `claude-debug-nl-search-check`, `claude-debug-season-total-check`
+   (this last one was reused, not recreated, for this phase's own
+   production diagnostics — see Phase 6 above — so it's still the same
+   one service, not a new addition to this list). Plus one created by
+   mistake during the 2026-09-17 season_total/box-score verification
+   pass — `ai-application-nfl`, a stray full-repo clone triggered by
+   calling the wrong Railway tool while the MCP connection was
+   reconnecting. Delete all 5 manually from the Railway dashboard
+   whenever convenient.
 
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the

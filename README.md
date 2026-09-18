@@ -1,18 +1,21 @@
 # Chalk That NFL
 
-A stats research app for NFL teams and players — built as the first app in a
-personal "Chalk That" platform (a sibling to an existing Chalk That MLB app).
-It pulls real historical and current-season data from
-[nflverse](https://github.com/nflverse) into Postgres, then exposes it
-through one shared query API that a browser UI (and, eventually, a team of
-AI research agents) both call the same way: give it an entity, a scope, and
-some splits, and get back real numbers with no predictions baked in — home/
-away splits, weather-condition splits, time-slot splits, season averages,
-last-5, career, or a full game log. The bigger idea driving the design: this
-becomes the data layer a fleet of AI agents can query directly to do the
-research and number-crunching behind sports betting picks, instead of
-someone doing that by hand. See `docs/architecture.md` for the full design
-writeup, including that "Part 2" vision.
+A stats-and-betting research app for NFL teams and players — built as the
+first app in a personal "Chalk That" platform (a sibling to an existing
+Chalk That MLB app). Part 1 is a research layer with no predictive
+calculations — real historical and current-season data from
+[nflverse](https://github.com/nflverse), Highlightly, and The Odds API,
+exposed through one shared query API (`POST /query`) that the web UI and a
+Part 2 agent team both call the same way: give it an entity, a scope, and
+some splits, get back real numbers — home/away splits, weather-condition
+splits, time-slot splits, season averages, last-5, career, or a full game
+log. Part 2, layered on top and fully live, is a small deterministic agent
+team (Rankings, Edge, Portfolio, a calibration/tracking loop, and a
+Claude-backed conversational agent) plus a Player Props board with
+real-time bookmaker lines, a deterministic recent-form lean, and final-game
+grading once each game ends. See `docs/architecture.md` for the platform
+design writeup and `docs/part2-roadmap.md` for the full Part 2 build
+history and current backlog.
 
 **Live app:** https://web-production-5f05d.up.railway.app
 **API:** https://backend-api-production-15ce.up.railway.app
@@ -41,7 +44,7 @@ writeup, including that "Part 2" vision.
 | Frontend | React (JS, not TS) + Vite + Tailwind v4 + React Router v7 | Matches the plain-JS backend rather than mixing languages; Vite + Tailwind v4's `@tailwindcss/vite` plugin needs no separate PostCSS config. |
 | Auth | JWT access token + rotating refresh token (humans), long-lived API key (agents/services) | Two credential types sharing one `authenticate` middleware — see `docs/architecture.md` §2/§4.5. Refresh-token replay triggers a full session revoke, not just a rejected request. |
 | Ingestion | A separate Node worker (`worker/`), its own Railway service, no public domain | Keeps the trusted internal writer (direct DB access) fully separate from the public, auth-gated API — see `docs/architecture.md` §4. |
-| Data source | [nflverse](https://github.com/nflverse) (free, open, CC-BY-4.0) | Historical stats, rosters, schedules, and weather are all in one place; current-season/live stats and sportsbook odds are intentionally deferred (see Known limitations below). |
+| Data source | [nflverse](https://github.com/nflverse) (free, open, CC-BY-4.0) for historical/roster/schedule data, plus **Highlightly** (live stats, injuries) and **The Odds API** (game + player-prop odds) for current-season data — see `docs/part2-roadmap.md` Phase 1 for the vendor decisions and `docs/architecture.md` §3. | All three vendors are live, not deferred — see Known limitations below for what's still genuinely open. |
 | Deploy | Railway (3 services + managed Postgres/Redis, one project) | One project holds `backend-api`, `web`, and `ingestion-worker`, all sharing the same Postgres/Redis instances. |
 
 ---
@@ -86,25 +89,48 @@ npm run dev                 # Vite dev server on :5173
 The ingestion worker (`npm run worker -- <jobType>` for a one-shot dry run,
 or `npm run worker` for the real scheduler) is optional for local dev — the
 historical backfill script covers everything needed to explore the app.
-Job types: `sync_roster`, `sync_schedule`, `sync_historical_stats` are real;
-`sync_forecast_weather`, `sync_injury_reports`, `sync_live_stats` are wired
-for scheduling but still stubbed (see Known limitations).
+All ten job types are real and live: `sync_roster`, `sync_schedule`,
+`sync_historical_stats`, `sync_historical_weather` (nflverse),
+`sync_forecast_weather` (Open-Meteo), `sync_injury_reports`,
+`sync_live_stats`, `sync_live_scores` (Highlightly), `sync_odds`,
+`sync_player_props` (The Odds API) — see Known limitations for what's
+still genuinely open.
 
 ---
 
 ## Known limitations / future work
 
-- **Three of six ingestion jobs are still stubs.** `sync_forecast_weather`,
-  `sync_injury_reports`, and `sync_live_stats` have real scheduling logic
-  but no vendor integration yet — current-season/live stats and injury
-  reports depend on a still-open vendor decision (BallDontLie vs.
-  Highlightly), and forecast weather needs an Open-Meteo API key
-  provisioned. Historical stats, rosters, and schedules are fully real.
+*Updated 2026-09-18 at Player Props phase close-out — see
+`docs/part2-roadmap.md`'s own Backlog section for the full, actively
+maintained list; this is a shorter pointer version for anyone starting
+from the README.*
+
+- **No iOS app yet.** Next up — the same `backend-api` surface a browser
+  client calls (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,
+  `/portfolio`, `/picks`, the chat agent's routes) is what a native client
+  would call too, so no backend rework is anticipated before drafting the
+  iOS plan.
+- **One real, scoped bug still open in Player Props:**
+  `resolvePlayerForProp()` (`worker/ingestion-worker.js`) has no
+  suffix-normalization fallback, so a real player whose name carries a
+  generational suffix mismatch (Jr./Sr./II/III/IV) between The Odds API
+  and this app's own roster is silently dropped from the Props board —
+  confirmed in real production logs 2026-09-18. Its sibling function,
+  `resolvePlayerForBoxScore()`, already has this fix; it was never
+  ported over. See `docs/part2-roadmap.md`'s Backlog for detail.
+- **Game props (team totals, alt lines) not built yet** — a deliberate,
+  scoped-out follow-up to Player Props, same `game_odds` pattern
+  `sync_odds`/`routes/odds.js` already use.
+- **Drive events (play-by-play) for live games** have no confirmed data
+  source yet — nflverse is batch/historical only, and no live vendor's
+  play-by-play field has actually been checked for. Needs real vendor
+  research before it can even be sized.
 - **No automated test suite.** Everything was verified through manual
   dry-runs and live browser stress-testing (see Phase 6 in
-  `docs/vibe-coding-checklist.md`) rather than unit/integration tests —
-  fine for a personal project at this stage, a real gap if this ever needs
-  other contributors.
+  `docs/vibe-coding-checklist.md` for Part 1, `docs/part2-roadmap.md` for
+  every Part 2 feature's own real-data verification) rather than unit/
+  integration tests — fine for a personal project at this stage, a real
+  gap if this ever needs other contributors.
 - **No rate limiting on `/login` or `/refresh`.** Reviewed during the
   hardening pass and deliberately deferred — worth adding before any
   real/public exposure.
@@ -112,18 +138,17 @@ for scheduling but still stubbed (see Known limitations).
   reviewed and deliberately left alone for now; would reduce XSS exposure
   but is a larger client-side rework than this pass's scope.
 - **No signup flow.** Accounts are created directly via
-  `scripts/create-test-user.js` — fine for personal/friends use, not built
-  for self-serve.
-- **Natural-language search and the AI agent layer are designed, not yet
-  built.** `docs/architecture.md` §1 and §5 sketch both — a "Part 2" agent
-  service that would call the same `/query` API a human click does, plus a
-  natural-language translation layer in front of it. This is the actual
-  long-term point of building Part 1 the way it's built.
-- **No iOS app yet** — planned as a fast-follow on the same API, not
-  started.
-- **Sportsbook odds/props** are deferred past this stage entirely.
+  `scripts/create-test-user.js` — checked and deliberately scrapped as a
+  backlog item (not just deferred) once the real `users` table showed no
+  evidence a self-serve flow is actually needed yet; see
+  `docs/part2-roadmap.md`'s Backlog for the full reasoning.
+- **5 leftover diagnostic Railway services** need manual deletion from
+  the dashboard — the `delete-service` tool call has repeatedly timed
+  out in this environment (most recently re-confirmed 2026-09-18); not
+  urgent, doesn't affect the live app.
 
 For the full build history, every real bug hit along the way, and the
 day-by-day decisions behind all of the above, see `docs/architecture.md`
-(design decisions) and `docs/vibe-coding-checklist.md` (phase-by-phase build
+(platform design), `docs/part2-roadmap.md` (Part 2 build history + live
+backlog), and `docs/vibe-coding-checklist.md` (Part 1 phase-by-phase build
 log).
