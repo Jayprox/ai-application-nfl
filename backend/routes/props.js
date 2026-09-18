@@ -28,6 +28,21 @@
  * (via runStatsQuery, scope 'last5') rather than re-deriving an average
  * here — same "one source of truth" principle the rest of this app
  * follows for stats.
+ *
+ * Final-game grading (2026-09-18, "show if the props hit" request) —
+ * same idea frontend/src/components/OddsBadge.jsx already applies to
+ * game-level odds ("lock the values when the game starts... and then
+ * when finished, show what did hit"): once the game is final, this route
+ * also hands back the player's ACTUAL stat line for this specific game
+ * (final_value below) — not the last5 average context above, a real
+ * single-game number — so the frontend can grade the locked line against
+ * reality the same way OddsBadge grades a spread/total/moneyline, without
+ * a second round trip. The grading itself (over/under/push, or scored/
+ * no-TD) stays a frontend concern, same division of labor OddsBadge
+ * already uses (backend hands over raw ingredients, frontend derives the
+ * label) — kept here rather than in picks_log/grade_picks because a
+ * prop board entry isn't a user's pick, it's the market's own line; there
+ * is nothing to grade "correct/incorrect" against.
  * =========================================================================
  */
 
@@ -131,8 +146,35 @@ async function attachContext(rows, season) {
       under_price: r.under_price,
       bookmaker_last_update: r.bookmaker_last_update,
       synced_at: r.synced_at,
+      game_status: r.game_status,
       player: { player_id: r.player_id, full_name: r.full_name, position: r.position, team_id: r.team_id },
     };
+
+    // Only fetch a real per-game value once the game is actually final —
+    // same gate OddsBadge.jsx uses ("status === 'final'") before grading
+    // anything. Distinct from the recent_avg/td_rate context below (which
+    // always covers the player's last 5 PAST games, an over-time trend),
+    // this is the ONE specific game this prop is for. No row (DNP,
+    // inactive, vendor gap) leaves final_value null — same "can't grade,
+    // don't guess" stance grade_picks' own void case takes.
+    let finalValue = null;
+    if (r.game_status === 'final') {
+      if (r.market === 'player_anytime_td') {
+        const { rows: finalRows } = await query(
+          `SELECT (COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0) + COALESCE(passing_tds, 0)) AS value
+           FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
+          [r.game_id, r.player_id]
+        );
+        finalValue = finalRows.length ? (Number(finalRows[0].value) > 0 ? 1 : 0) : null;
+      } else if (MARKET_STAT_COLUMN[r.market]) {
+        const { rows: finalRows } = await query(
+          `SELECT ${MARKET_STAT_COLUMN[r.market]} AS value FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
+          [r.game_id, r.player_id]
+        );
+        finalValue = finalRows.length && finalRows[0].value !== null ? Number(finalRows[0].value) : null;
+      }
+    }
+    base.final_value = finalValue;
 
     const statColumn = MARKET_STAT_COLUMN[r.market];
     if (statColumn) {
@@ -190,7 +232,7 @@ router.get('/players', async (req, res) => {
 
     const { rows } = await query(
       `SELECT DISTINCT ON (ppo.game_id, ppo.player_id, ppo.bookmaker, ppo.market)
-              ppo.*, p.full_name, p.position, p.current_team_id AS team_id
+              ppo.*, p.full_name, p.position, p.current_team_id AS team_id, g.status AS game_status
        FROM player_prop_odds ppo
        JOIN games g ON g.game_id = ppo.game_id
        JOIN players p ON p.player_id = ppo.player_id

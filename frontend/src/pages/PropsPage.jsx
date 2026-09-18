@@ -31,6 +31,16 @@ import AsyncState from '../components/AsyncState';
  * Market tabs mirror the MLB screenshot's HR/Hits/K/Outs/Games row, just
  * over this app's own 5 launch markets (backend/routes/props.js's
  * MARKET_STAT_COLUMN + player_anytime_td) rather than baseball's.
+ *
+ * Final-game grading (2026-09-18, "show if the props hit" request) —
+ * same pattern components/OddsBadge.jsx already established for
+ * game-level odds: once a card's game is final, its corner badge swaps
+ * from the pregame LeanBadge to a FinalResultBadge describing what
+ * actually happened against the locked line (backend/routes/props.js's
+ * new final_value), styled with the same text-positive/bg-positive
+ * "hit" token OddsBadge/EdgeBadge already use elsewhere in this app —
+ * not a grade of whether our own pregame lean called it right, just
+ * "what hit," same framing OddsBadge uses for spread/total/moneyline.
  */
 
 const CURRENT_SEASON = 2026;
@@ -55,6 +65,45 @@ function LeanBadge({ lean }) {
   return (
     <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-semibold ${badge.className}`}>
       {badge.label}
+    </span>
+  );
+}
+
+// Grades a final game's prop the same way OddsBadge.jsx's gradeSpread/
+// gradeTotal/gradeMoneyline grade game odds: describe the outcome that
+// actually happened against the locked line, not whether a prediction
+// was right. hit: true is the normal "this is what happened" case
+// (rendered in the positive token below); hit: null is only for an
+// exact push, same neutral treatment OddsBadge gives a push/tie. Returns
+// null when the game isn't final yet, or final_value came back null
+// (DNP/no data — see backend/routes/props.js's own comment on that).
+function gradeProp(prop) {
+  if (prop.game_status !== 'final' || prop.final_value == null) return null;
+
+  if (prop.market === 'player_anytime_td') {
+    const scored = prop.final_value > 0;
+    return { label: scored ? 'Scored a TD' : 'No TD', hit: true };
+  }
+
+  if (prop.line == null) return null;
+  const line = Number(prop.line);
+  const actual = prop.final_value;
+  if (actual === line) return { label: `${prop.line} (Push)`, hit: null };
+  return {
+    label: actual > line ? `O ${prop.line} (${actual})` : `U ${prop.line} (${actual})`,
+    hit: true,
+  };
+}
+
+function FinalResultBadge({ grade }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold tabular-nums ${
+        grade.hit ? 'text-positive bg-positive/12' : 'text-ink-dim bg-surface-2'
+      }`}
+    >
+      {grade.hit ? '✓ ' : ''}
+      {grade.label}
     </span>
   );
 }
@@ -93,6 +142,7 @@ function leanSortKey(prop) {
 
 function PropCard({ prop }) {
   const isAnytimeTd = prop.market === 'player_anytime_td';
+  const grade = gradeProp(prop);
   return (
     <div className="rounded-md border border-line bg-surface px-4 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -133,7 +183,7 @@ function PropCard({ prop }) {
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <LeanBadge lean={prop.lean} />
+          {grade ? <FinalResultBadge grade={grade} /> : <LeanBadge lean={prop.lean} />}
           <span className="text-xs text-ink-faint">{prop.bookmaker}</span>
         </div>
       </div>
