@@ -679,7 +679,54 @@ drafting the iOS app is the last thing in this list, not the first.
    on top of what `sync_odds`/`sync_player_props` already spend. Revisit
    again once alt lines (#4) or more player markets (#5) actually ship,
    since either adds real per-event cost on top of this.
-7. **Delete 5 leftover Railway services.** Not urgent — dashboard
+7. **Props confidence signal — simulation model decided against, three
+   deterministic enrichments identified instead. Not started.** Raised
+   2026-09-18: Chalk That MLB's Board shows a Monte Carlo-based
+   confidence score per prop (`src/scoring/sim.js` — a seeded ~500-trial
+   simulation per market, Bayesian-shrunk recent-form mean, correlated
+   park/matchup perturbations, then the % of trials that clear the
+   line). `/props/players`'s own header comment had already flagged "a
+   genuine simulation/confidence-score model... deliberately separate,
+   backlogged follow-up" back when Player Props shipped, but it never
+   actually became a tracked item until now — this closes that gap.
+
+   **Explicit call: not building the simulation/probability model in
+   this app.** It would be a real exception to the "translation, not
+   computation" principle every route so far follows (`architecture.md`
+   §2; `/edge`'s own header comment already declined an implied-
+   probability score for the same reason, back when Game props shipped)
+   — a Monte Carlo output is a genuinely invented number, not a display
+   of something real, and MLB's own version leans on domain-tuned priors
+   (K/9 baselines, HR-rate shrinkage, park factors) this app doesn't
+   have and hasn't calibrated. That kind of predictive modeling is being
+   left to external tooling/agents built on top of this app's real data
+   via the API, not built into the core pipeline.
+
+   **What's staying**, because it passes the "translation" test (real
+   counts/averages of things that already happened, not estimates of
+   things that haven't) — three enrichments to `/props/players`, same
+   deterministic spirit as the existing `edgePct`:
+   - *Historical hit rate.* `player_prop_odds` is append-only, so past
+     weeks' lines are still there; joined against the real final stat
+     line for those games (already pulled for final-game grading), this
+     becomes a literal count — "cleared the line in 5 of the last 7
+     games with a line." Label it as a count ("5-2"), not a percentage,
+     so it doesn't read as a probability it isn't.
+   - *Opponent-allowed context.* A real aggregate of what this specific
+     defense has actually allowed to this position (yards/game, TD
+     rate, over the season or last N games) — shown alongside the
+     existing player-side lean as a second real number, not blended
+     into one composite score.
+   - *Line movement.* Opening line vs. current line, straight off the
+     same append-only odds history already being collected — a real,
+     observed market fact.
+
+   Not started. No new schema anticipated — `player_prop_odds`'s own
+   history plus the existing box-score/stat tables cover all three, so
+   this is query/aggregation work on data already being collected, not
+   a new data source.
+
+8. **Delete 5 leftover Railway services.** Not urgent — dashboard
    cleanup only, none of these affect the live app. Diagnostic/temp
    services created during debugging sessions that `delete-service`
    couldn't remove (the tool call times out at 180s, a known systemic
@@ -695,7 +742,7 @@ drafting the iOS app is the last thing in this list, not the first.
    calling the wrong Railway tool while the MCP connection was
    reconnecting. Delete all 5 manually from the Railway dashboard
    whenever convenient.
-8. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+9. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
    API, no rework needed later." The API surface (`/query`,
    `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
    `/picks`, chat) is the same one a native client would call; no
