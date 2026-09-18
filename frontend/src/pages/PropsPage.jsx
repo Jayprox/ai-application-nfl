@@ -108,6 +108,16 @@ function FinalResultBadge({ grade }) {
   );
 }
 
+// backend/routes/props.js now filters to DraftKings only (2026-09-18,
+// "switch it to the default, DraftKings" request) -- every card's
+// bookmaker is the same book, so this just displays the vendor's raw
+// 'draftkings' key in title case rather than adding a whole label map
+// for one entry.
+function formatBookmaker(bookmaker) {
+  if (bookmaker === 'draftkings') return 'DraftKings';
+  return bookmaker;
+}
+
 function formatPrice(price) {
   if (price === null || price === undefined) return '—';
   const num = Number(price);
@@ -184,7 +194,7 @@ function PropCard({ prop }) {
 
         <div className="flex shrink-0 flex-col items-end gap-1">
           {grade ? <FinalResultBadge grade={grade} /> : <LeanBadge lean={prop.lean} />}
-          <span className="text-xs text-ink-faint">{prop.bookmaker}</span>
+          <span className="text-xs text-ink-faint">{formatBookmaker(prop.bookmaker)}</span>
         </div>
       </div>
     </div>

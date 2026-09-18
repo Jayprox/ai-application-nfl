@@ -18,11 +18,25 @@
  * append-only time series, same as game_odds — this route picks the
  * latest synced_at per (game_id, player_id, bookmaker, market), same
  * DISTINCT ON pattern routes/odds.js already uses, and further narrows
- * to one representative bookmaker per (player, market) using the same
- * BOOKMAKER preference order the frontend's GameDetailPage.jsx already
- * displays (first available wins) — a slate view showing every
- * bookmaker's own line per player would be noise for a first version;
- * per-bookmaker comparison is easy to add later once this is live.
+ * to DraftKings specifically per (player, market) — same DK-only, no-
+ * cross-book-fallback convention frontend/src/components/OddsBadge.jsx
+ * already established for game odds ("highest-volume US book, a
+ * reasonable default while there's no per-user preferred-book setting
+ * yet"). A slate view showing every bookmaker's own line per player
+ * would be noise for a first version; per-bookmaker comparison is easy
+ * to add later once this is live.
+ *
+ * FIXED 2026-09-18 ("switch it to the default, DraftKings" request):
+ * this originally picked from a BOOKMAKER_ORDER preference LIST via
+ * indexOf() comparison, but any bookmaker not actually in that list
+ * (e.g. the vendor's 'betonlineag', 'betrivers', 'fanatics' — never
+ * added to the list) resolved to indexOf() === -1, which compared as
+ * LOWER (i.e. higher priority) than every real entry in the list — so
+ * an unlisted book always won over the intended betmgm/draftkings/
+ * fanduel/bovada/williamhill_us order, which is why the board was
+ * showing betonlineag instead. Replaced with a direct DraftKings filter
+ * (real production data confirmed DK has full coverage across all 5
+ * launch markets, so this isn't trading coverage for the fix).
  *
  * Recent-form context reuses backend/lib/stats-query.js's queryPlayer()
  * (via runStatsQuery, scope 'last5') rather than re-deriving an average
@@ -52,10 +66,10 @@ const { runStatsQuery } = require('../lib/stats-query');
 
 const router = express.Router();
 
-// Same bookmaker allowlist + preference order GameDetailPage.jsx already
-// uses for game odds — kept in sync manually (small, stable list) rather
-// than sharing a module across frontend/backend for five strings.
-const BOOKMAKER_ORDER = ['betmgm', 'draftkings', 'fanduel', 'bovada', 'williamhill_us'];
+// Same single-bookmaker convention OddsBadge.jsx already uses for game
+// odds — kept in sync manually (one string) rather than sharing a
+// module across frontend/backend for it.
+const DRAFTKINGS_KEY = 'draftkings';
 
 // market -> which *_game_stats column (via stats-query.js's offense
 // group — every one of these 5 markets happens to be an offensive stat)
@@ -117,19 +131,19 @@ function leanFromTdRate(tdRate, gamesPlayed) {
   return { lean: 'toss_up', reasoning: `Scored in ${pct}% of last ${gamesPlayed} games — no clear signal.`, edgePct };
 }
 
-// Picks one representative bookmaker's row per (player, market) using
-// BOOKMAKER_ORDER's preference, then attaches recent-form context + a
-// deterministic lean. Runs the stats-query lookup once per (player,
-// market) pair actually present, not once per raw odds row — a player
-// offered by 4 books for the same market only costs one lookup.
+// Picks DraftKings's row per (player, market) — see header comment for
+// why a single book rather than a preference list — then attaches
+// recent-form context + a deterministic lean. Runs the stats-query
+// lookup once per (player, market) pair actually present, not once per
+// raw odds row. A player DraftKings hasn't posted this market for yet
+// just doesn't appear, same graceful-omission convention OddsBadge.jsx
+// uses ("renders nothing until DraftKings has actually posted a line").
 async function attachContext(rows, season) {
   const byPlayerMarket = new Map();
   for (const r of rows) {
+    if (r.bookmaker !== DRAFTKINGS_KEY) continue;
     const key = `${r.player_id}|${r.market}`;
-    const existing = byPlayerMarket.get(key);
-    if (!existing || BOOKMAKER_ORDER.indexOf(r.bookmaker) < BOOKMAKER_ORDER.indexOf(existing.bookmaker)) {
-      byPlayerMarket.set(key, r);
-    }
+    byPlayerMarket.set(key, r);
   }
 
   const picked = [...byPlayerMarket.values()];
