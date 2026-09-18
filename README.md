@@ -111,6 +111,14 @@ from the README.*
   The Odds API returns many lines per bookmaker for those, not one
   current line, so they need their own storage shape and probably their
   own UI. See `docs/part2-roadmap.md`'s Backlog.
+- **Props real-signal enrichments not built yet** — historical hit
+  rate, opponent-allowed context, and line movement, all identified
+  2026-09-18 as ways to extend `/props/players` that stay within the
+  translation-not-computation rule (see `docs/architecture.md` §2). A
+  Chalk That MLB-style Monte Carlo confidence score was explicitly
+  decided against for this app — that kind of predictive modeling is
+  left to external tooling built on top of the API, not the core
+  pipeline. See `docs/part2-roadmap.md`'s Backlog item 7.
 - **Drive events (play-by-play) for live games** have no confirmed data
   source yet — nflverse is batch/historical only, and no live vendor's
   play-by-play field has actually been checked for. Needs real vendor
