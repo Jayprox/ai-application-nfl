@@ -9,6 +9,12 @@
  * exposing the raw log — a "current odds" view, same idea the migration's
  * comment already flagged as the intended future read pattern.
  *
+ * Team totals (added 2026-09-18, db/migrations/013_team_totals_odds.sql,
+ * worker's sync_team_totals job): the 'team_totals' market writes TWO
+ * rows per bookmaker (one per team, via the new team_side column) rather
+ * than one, so both routes' "latest per ___" dedup now groups by
+ * (..., team_side) too — see each query's own comment below.
+ *
  * Closing-line lock (added 2026-09-15, Board page request: "lock the
  * values when the game starts, so it doesn't change during the game"):
  * sync_odds keeps polling a live event and INSERTing new rows for as long
@@ -61,6 +67,10 @@ function formatOddsRow(r) {
     over_price: r.over_price,
     under_price: r.under_price,
     total_point: r.total_point,
+    // 'team_totals' only (db/migrations/013_team_totals_odds.sql) --
+    // which team over_price/under_price/total_point above belong to.
+    // Always null for every other market.
+    team_side: r.team_side,
     bookmaker_last_update: r.bookmaker_last_update,
     synced_at: r.synced_at,
   };
@@ -74,12 +84,18 @@ router.get('/games/:id', async (req, res) => {
     if (!gameRows[0]) return res.status(404).json({ error: 'game not found' });
 
     const { rows } = await query(
-      `SELECT DISTINCT ON (go.bookmaker, go.market) go.*
+      // DISTINCT ON includes team_side so a 'team_totals' market's two
+      // rows (home + away, see db/migrations/013_team_totals_odds.sql)
+      // both survive the "latest per bookmaker/market" dedup instead of
+      // one clobbering the other -- Postgres treats NULL as an equal
+      // grouping key here, so every other market (team_side always
+      // NULL) dedups exactly as before.
+      `SELECT DISTINCT ON (go.bookmaker, go.market, go.team_side) go.*
        FROM game_odds go
        JOIN games g ON g.game_id = go.game_id
        WHERE go.game_id = $1
          AND (g.status NOT IN ('in_progress', 'final') OR go.synced_at <= g.game_datetime)
-       ORDER BY go.bookmaker, go.market, go.synced_at DESC`,
+       ORDER BY go.bookmaker, go.market, go.team_side, go.synced_at DESC`,
       [id]
     );
 
@@ -116,12 +132,13 @@ router.get('/', async (req, res) => {
     }
 
     const { rows } = await query(
-      `SELECT DISTINCT ON (go.game_id, go.bookmaker, go.market) go.*
+      // Same team_side addition as GET /games/:id above.
+      `SELECT DISTINCT ON (go.game_id, go.bookmaker, go.market, go.team_side) go.*
        FROM game_odds go
        JOIN games g ON g.game_id = go.game_id
        WHERE g.season = $1 ${weekFilter}
          AND (g.status NOT IN ('in_progress', 'final') OR go.synced_at <= g.game_datetime)
-       ORDER BY go.game_id, go.bookmaker, go.market, go.synced_at DESC`,
+       ORDER BY go.game_id, go.bookmaker, go.market, go.team_side, go.synced_at DESC`,
       params
     );
 

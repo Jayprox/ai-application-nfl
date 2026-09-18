@@ -635,13 +635,32 @@ drafting the iOS app is the last thing in this list, not the first.
    `/matches/{id}` response has something nobody's checked for, or
    sourcing a different vendor entirely) before this can even be sized,
    let alone built.
-3. **Game props (team totals, alt lines).** The deliberate follow-up
-   noted in Player Props' own original commit message (`9dd9ef5`,
-   2026-09-17) — same `game_odds` pattern `sync_odds`/`routes/odds.js`
-   already use, extended to alt lines/team totals rather than just the
-   featured h2h/spread/total market. Not started; Player Props (this
-   phase) came first on purpose.
-4. **Additional player-prop markets beyond the 5 launch markets.** The
+3. **Game props: team totals — shipped 2026-09-18.** The deliberate
+   follow-up noted in Player Props' own original commit message
+   (`9dd9ef5`, 2026-09-17). Extends `game_odds` with a `team_totals`
+   market (`db/migrations/013_team_totals_odds.sql`) rather than a new
+   table — the vendor's per-team Over/Under already matches the row
+   shape `game_odds` uses for the existing `totals` market (an O/U pair
+   + a point), it just needed one new column (`team_side`) to say which
+   team. New `sync_team_totals` worker job (same per-event endpoint and
+   current-week-only scoping as `sync_player_props`, confirmed live
+   2026-09-18 at 1 credit/event for this market). `routes/odds.js`'s two
+   "latest odds" queries extended to dedup on `team_side` too, so a
+   bookmaker's home *and* away team-total rows both survive. Surfaced on
+   `GameDetailPage`'s existing odds board only (a new "Team Total"
+   section) — the compact card badges (`OddsBadge`/`GameCard`) stay
+   DraftKings-spread/total-only, unchanged, on purpose (deliberately
+   terse, already busy).
+4. **Game props: alternate spreads/totals — split out, not started.**
+   Deliberately NOT built alongside team totals above: confirmed live
+   2026-09-18 that The Odds API's `alternate_spreads`/`alternate_totals`
+   markets return MANY lines per bookmaker (every available point value)
+   rather than one current line, so they don't fit `game_odds`'s "one
+   row = one bookmaker's current line" shape the way team totals did —
+   needs its own storage shape (one row per line, not per bookmaker) and
+   probably its own UI (a line picker, not just another list entry).
+   Real scoping work, not a quick extension of #3.
+5. **Additional player-prop markets beyond the 5 launch markets.** The
    Odds API offers more player markets than `PLAYER_PROP_MARKETS`
    currently pulls (e.g. pass attempts/completions/interceptions,
    longest reception, sacks) — deliberately curated narrow at launch
@@ -649,15 +668,18 @@ drafting the iOS app is the last thing in this list, not the first.
    `worker/ingestion-worker.js`) to bound API credit cost before real
    usage was visible. Worth revisiting now that Player Props has run
    through a real live game.
-5. **`sync_player_props` credit-usage check.** Its own header comment
-   already flags this as "a starting point, not settled — revisit once
-   real credit usage is visible." That real usage is visible now (this
-   phase shipped and ran through DET@BUF 2026-09-18) — worth an actual
-   check of The Odds API's remaining monthly credits against
-   `sync_odds`'s existing budget before either scaling up markets (#4)
-   or adding Game props (#3), both of which would add more per-event
-   calls on top of this job's existing one-call-per-game-per-week cost.
-6. **Delete 5 leftover Railway services.** Not urgent — dashboard
+6. **`sync_player_props`/`sync_odds` credit-usage check — done
+   2026-09-18.** Checked live before building #3 above (its own header
+   comment flagged this as "a starting point, not settled — revisit once
+   real credit usage is visible," and this app's own backlog said to do
+   it before scaling up markets or adding Game props): a free
+   `/v4/sports` call's `X-Requests-Remaining` header showed 19,109 of
+   this billing cycle's requests still available (891 used) — real,
+   plenty of headroom for `sync_team_totals`'s narrow per-event addition
+   on top of what `sync_odds`/`sync_player_props` already spend. Revisit
+   again once alt lines (#4) or more player markets (#5) actually ship,
+   since either adds real per-event cost on top of this.
+7. **Delete 5 leftover Railway services.** Not urgent — dashboard
    cleanup only, none of these affect the live app. Diagnostic/temp
    services created during debugging sessions that `delete-service`
    couldn't remove (the tool call times out at 180s, a known systemic
@@ -673,7 +695,7 @@ drafting the iOS app is the last thing in this list, not the first.
    calling the wrong Railway tool while the MCP connection was
    reconnecting. Delete all 5 manually from the Railway dashboard
    whenever convenient.
-7. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+8. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
    API, no rework needed later." The API surface (`/query`,
    `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
    `/picks`, chat) is the same one a native client would call; no

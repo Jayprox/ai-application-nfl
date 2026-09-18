@@ -89,12 +89,12 @@ npm run dev                 # Vite dev server on :5173
 The ingestion worker (`npm run worker -- <jobType>` for a one-shot dry run,
 or `npm run worker` for the real scheduler) is optional for local dev — the
 historical backfill script covers everything needed to explore the app.
-All ten job types are real and live: `sync_roster`, `sync_schedule`,
+All eleven job types are real and live: `sync_roster`, `sync_schedule`,
 `sync_historical_stats`, `sync_historical_weather` (nflverse),
 `sync_forecast_weather` (Open-Meteo), `sync_injury_reports`,
 `sync_live_stats`, `sync_live_scores` (Highlightly), `sync_odds`,
-`sync_player_props` (The Odds API) — see Known limitations for what's
-still genuinely open.
+`sync_player_props`, `sync_team_totals` (both The Odds API) — see Known
+limitations for what's still genuinely open.
 
 ---
 
@@ -105,9 +105,12 @@ still genuinely open.
 maintained list; this is a shorter pointer version for anyone starting
 from the README.*
 
-- **Game props (team totals, alt lines) not built yet** — a deliberate,
-  scoped-out follow-up to Player Props, same `game_odds` pattern
-  `sync_odds`/`routes/odds.js` already use.
+- **Game props: alternate spreads/totals not built yet** — team totals
+  shipped 2026-09-18 (`sync_team_totals`, `game_odds`'s new
+  `team_totals` market), but alt lines are a separate, harder problem:
+  The Odds API returns many lines per bookmaker for those, not one
+  current line, so they need their own storage shape and probably their
+  own UI. See `docs/part2-roadmap.md`'s Backlog.
 - **Drive events (play-by-play) for live games** have no confirmed data
   source yet — nflverse is batch/historical only, and no live vendor's
   play-by-play field has actually been checked for. Needs real vendor

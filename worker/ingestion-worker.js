@@ -2236,6 +2236,149 @@ async function syncPlayerProps() {
 }
 
 // ---------------------------------------------------------------------
+// sync_team_totals (2026-09-18, "Game props (team totals, alt lines)"
+// backlog item -- see docs/part2-roadmap.md and
+// db/migrations/013_team_totals_odds.sql's header). Team totals is a
+// per-team Over/Under (e.g. "Falcons team total") -- extends game_odds
+// with a 'team_totals' market rather than starting a new table, since
+// the row shape (over/under pair + a point) already matches what
+// game_odds stores for the 'totals' market; the only new thing is
+// which team a row is for (team_side column).
+//
+// Not in sync_odds's bulk /odds call -- confirmed live 2026-09-18 that
+// team_totals is one of The Odds API's "additional" markets, only
+// available from the per-event endpoint (same one sync_player_props
+// already uses), at a real, confirmed cost of 1 credit per event for
+// this one market. Scoped to the current week's games only, same
+// reasoning and same schedule shape as sync_player_props, for the same
+// credit-cost reason.
+//
+// Deliberately NOT covering alternate_spreads/alternate_totals here --
+// confirmed live 2026-09-18 that those return MANY lines per bookmaker
+// (every available point value), not one current line, so they don't
+// fit game_odds's "one row = one bookmaker's current line" shape the
+// way team_totals does. Left as its own backlog item (needs its own
+// storage shape and UI) rather than folded into this one.
+// ---------------------------------------------------------------------
+
+const TEAM_TOTALS_MARKET = 'team_totals';
+
+function teamTotalsOddsUrl(eventId) {
+  const params = new URLSearchParams({
+    apiKey: process.env.ODDS_API_KEY,
+    regions: 'us',
+    markets: TEAM_TOTALS_MARKET,
+    oddsFormat: 'american',
+  });
+  return `${PLAYER_PROP_ODDS_BASE}/${eventId}/odds?${params.toString()}`;
+}
+
+// Splits one team_totals market (which, per the vendor, already bundles
+// BOTH teams' Over/Under into a single market's outcomes -- confirmed
+// live 2026-09-18, see this section's header comment) into two row
+// shapes, one per team, matched against entry.home_team/away_team the
+// same way extractMarketRow() above matches h2h/spreads outcomes.
+function extractTeamTotalsRows(market, homeTeamName, awayTeamName) {
+  const bySide = { home: {}, away: {} };
+  for (const o of market.outcomes || []) {
+    const side = o.description === homeTeamName ? 'home' : o.description === awayTeamName ? 'away' : null;
+    if (!side) continue;
+    if (o.name === 'Over') { bySide[side].overPrice = o.price; bySide[side].totalPoint = o.point; }
+    else if (o.name === 'Under') { bySide[side].underPrice = o.price; bySide[side].totalPoint = o.point; }
+  }
+  return [
+    { teamSide: 'home', ...bySide.home },
+    { teamSide: 'away', ...bySide.away },
+  ].filter((r) => r.overPrice !== undefined || r.underPrice !== undefined);
+}
+
+async function syncTeamTotals() {
+  if (!process.env.ODDS_API_KEY) {
+    console.warn('[job:sync_team_totals] ODDS_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+
+  const current = await getCurrentWeekForProps();
+  if (!current) {
+    console.warn('[job:sync_team_totals] no current week resolved — skipping');
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: weekGames } = await pool.query(
+    `SELECT game_id FROM games WHERE season = $1 AND week = $2`,
+    [current.season, current.week]
+  );
+  if (weekGames.length === 0) {
+    console.log('[job:sync_team_totals] no games scheduled for the current week — nothing to sync');
+    return { recordsProcessed: 0 };
+  }
+  const weekGameIds = new Set(weekGames.map((g) => g.game_id));
+
+  let events;
+  try {
+    // Reuses the same free events-listing endpoint sync_player_props
+    // uses (no markets requested = no credit cost) -- this is just the
+    // vendor's own event id per game, not odds data yet.
+    const text = await fetchText(playerPropEventsUrl());
+    events = JSON.parse(text);
+  } catch (err) {
+    console.warn(`[job:sync_team_totals] events fetch failed (${err.message})`);
+    return { recordsProcessed: 0 };
+  }
+  if (!Array.isArray(events)) {
+    console.warn(`[job:sync_team_totals] unexpected events response (not an array), skipping this run: ${JSON.stringify(events).slice(0, 500)}`);
+    return { recordsProcessed: 0 };
+  }
+
+  const { rows: teams } = await pool.query('SELECT team_id, name FROM teams');
+  const teamIdByName = {};
+  for (const t of teams) teamIdByName[t.name] = t.team_id;
+  const gameCache = new Map();
+
+  let inserted = 0;
+  let skipped = 0;
+  let eventsQueried = 0;
+
+  for (const event of events) {
+    const gameId = await findGameForOddsEntry(event, teamIdByName, gameCache);
+    if (!gameId || !weekGameIds.has(gameId)) continue; // not one of this week's games — out of scope for now
+
+    let oddsPayload;
+    try {
+      const text = await fetchText(teamTotalsOddsUrl(event.id));
+      oddsPayload = JSON.parse(text);
+    } catch (err) {
+      console.warn(`[job:sync_team_totals] odds fetch failed for event ${event.id} (${gameId}): ${err.message}`);
+      continue;
+    }
+    eventsQueried++;
+
+    for (const bookmaker of oddsPayload.bookmakers || []) {
+      for (const market of bookmaker.markets || []) {
+        if (market.key !== TEAM_TOTALS_MARKET) continue;
+        for (const row of extractTeamTotalsRows(market, event.home_team, event.away_team)) {
+          try {
+            await pool.query(
+              `INSERT INTO game_odds (
+                 game_id, bookmaker, market, team_side, over_price, under_price, total_point, bookmaker_last_update
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+              [gameId, bookmaker.key, TEAM_TOTALS_MARKET, row.teamSide, n(row.overPrice), n(row.underPrice), n(row.totalPoint), bookmaker.last_update || null]
+            );
+            inserted++;
+          } catch (err) {
+            skipped++;
+            console.warn(`[job:sync_team_totals] skipping one row (${gameId}/${bookmaker.key}/${row.teamSide}): ${err.message}`);
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[job:sync_team_totals] ${inserted} team-total row(s) recorded across ${eventsQueried} game(s) from the vendor${skipped ? ` (${skipped} row(s) skipped)` : ''}`);
+  return { recordsProcessed: inserted };
+}
+
+// ---------------------------------------------------------------------
 // grade_picks — calibration/tracking layer (Part 2 Phase 2, "3 paths"
 // discussion — see docs/part2-roadmap.md). Grades any picks_log row
 // whose linked game has gone final: looks up the actual stat value (or,
@@ -2485,6 +2628,21 @@ const JOBS = {
       ],
     },
     run: syncPlayerProps,
+  },
+  sync_team_totals: {
+    source: 'the-odds-api',
+    // Same per-event cost profile and reasoning as sync_player_props
+    // just above -- see that entry's comment and this job's own header
+    // comment (above syncTeamTotals()) for why.
+    schedule: {
+      type: 'proximity',
+      buckets: [
+        { hoursBefore: 72, intervalMinutes: 720 },
+        { hoursBefore: 24, intervalMinutes: 180 },
+        { hoursBefore: 0, intervalMinutes: 60 },
+      ],
+    },
+    run: syncTeamTotals,
   },
   grade_picks: {
     source: 'internal', // grades our own picks_log against our own games/stats — no vendor call

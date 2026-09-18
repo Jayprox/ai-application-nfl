@@ -83,8 +83,8 @@ import InjuryBadge from '../components/InjuryBadge';
  * full-season average.
  */
 
-const MARKET_LABEL = { spreads: 'Spread', h2h: 'Moneyline', totals: 'Total' };
-const MARKET_ORDER = ['spreads', 'h2h', 'totals'];
+const MARKET_LABEL = { spreads: 'Spread', h2h: 'Moneyline', totals: 'Total', team_totals: 'Team Total' };
+const MARKET_ORDER = ['spreads', 'h2h', 'totals', 'team_totals'];
 
 // Book display names + display order (2026-09-15): The Odds API syncs
 // every US bookmaker it has for a game (worker/ingestion-worker.js), but
@@ -507,6 +507,8 @@ export default function GameDetailPage() {
                             `${game.away_team_abbr} ${formatPoint(r.away_price)} · ${game.home_team_abbr} ${formatPoint(r.home_price)}`}
                           {market === 'totals' &&
                             `O/U ${r.total_point ?? '—'} (O ${formatPoint(r.over_price)} / U ${formatPoint(r.under_price)})`}
+                          {market === 'team_totals' &&
+                            `${r.team_side === 'home' ? game.home_team_abbr : game.away_team_abbr} O/U ${r.total_point ?? '—'} (O ${formatPoint(r.over_price)} / U ${formatPoint(r.under_price)})`}
                       </span>
                       </li>
                     ))}

@@ -1,0 +1,59 @@
+-- =========================================================================
+-- Migration: extend game_odds for team totals
+-- =========================================================================
+-- Run this once against the live Railway Postgres (same Data/Query tool
+-- used for schema.sql and every migration before it).
+--
+-- Part 2 backlog item "Game props (team totals, alt lines)" — the
+-- deliberate follow-up noted in Player Props' own original commit
+-- message (9dd9ef5, 2026-09-17). Scoped to team totals only for this
+-- migration; alternate spreads/totals are a separate backlog item (see
+-- docs/part2-roadmap.md) because The Odds API returns them as MANY lines
+-- per bookmaker rather than one current line, which doesn't fit this
+-- table's "one row per bookmaker" shape at all — team_totals does fit,
+-- so it goes first.
+--
+-- Design notes:
+--   - New enum value 'team_totals'. Confirmed against a real live event
+--     2026-09-18 (The Odds API's /events/{id}/odds, markets=team_totals):
+--     the vendor returns ONE market object per bookmaker whose outcomes
+--     array covers BOTH teams' totals (Over/Under x2, each outcome's
+--     `description` naming the team) — unlike h2h/spreads/totals, this
+--     is really two lines bundled into one vendor market. Rather than
+--     add a parallel set of home_*/away_* columns (6 new columns) or
+--     break the "one row = one side's over/under pair" shape the table
+--     otherwise keeps, this migration keeps that shape: sync_team_totals
+--     (worker/ingestion-worker.js) writes TWO rows per bookmaker for
+--     this market, reusing the existing over_price/under_price/
+--     total_point columns (already exactly "one side's O/U pair + a
+--     point") and adding one new column, team_side, to say which team's
+--     total a row is. NULL on every pre-existing market (h2h/spreads/
+--     totals never had a team side) and on team_totals rows before this
+--     migration ran (there aren't any yet).
+--   - Costs a per-event vendor call (this market isn't in the "featured"
+--     bulk /odds endpoint sync_odds already uses — same per-event
+--     endpoint sync_player_props uses for player markets, confirmed 1
+--     credit per event for this one market). Narrowed to the current
+--     week's games only, same reasoning and same schedule shape as
+--     sync_player_props — see that job's own comment in
+--     worker/ingestion-worker.js. Real credit headroom checked live
+--     2026-09-18 (X-Requests-Remaining on a free /sports call):
+--     19,109 of ~20,000 monthly requests remaining, well clear of what
+--     one more narrow per-event job adds.
+--   - backend/routes/odds.js's "latest row per (bookmaker, market)"
+--     DISTINCT ON queries are extended to DISTINCT ON (bookmaker,
+--     market, team_side) in the same commit as this migration — without
+--     that, only one of a bookmaker's two team_totals rows would ever
+--     survive the dedup. Postgres treats NULL as an equal grouping key
+--     in DISTINCT ON, so every pre-existing market (team_side always
+--     NULL) is unaffected.
+-- =========================================================================
+
+ALTER TYPE odds_market_enum ADD VALUE 'team_totals';
+
+-- Run as a separate statement/transaction from the ALTER TYPE above —
+-- Postgres won't let a new enum value be used in the same transaction
+-- that adds it. This ADD COLUMN doesn't reference the new value at all,
+-- but keeping it as its own statement avoids relying on that ordering
+-- being safe.
+ALTER TABLE game_odds ADD COLUMN team_side TEXT CHECK (team_side IN ('home', 'away'));
