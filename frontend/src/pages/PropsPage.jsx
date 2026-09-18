@@ -37,10 +37,9 @@ import AsyncState from '../components/AsyncState';
  * game-level odds: once a card's game is final, its corner badge swaps
  * from the pregame LeanBadge to a FinalResultBadge describing what
  * actually happened against the locked line (backend/routes/props.js's
- * new final_value), styled with the same text-positive/bg-positive
- * "hit" token OddsBadge/EdgeBadge already use elsewhere in this app —
- * not a grade of whether our own pregame lean called it right, just
- * "what hit," same framing OddsBadge uses for spread/total/moneyline.
+ * new final_value) — not a grade of whether our own pregame lean called
+ * it right, just "what hit," same framing OddsBadge uses for spread/
+ * total/moneyline.
  *
  * FIXED 2026-09-18 ("TOSS-UP badges never finalize" report) — a final
  * game whose grade came back ambiguous (final_value null) fell all the
@@ -56,6 +55,14 @@ import AsyncState from '../components/AsyncState';
  * returns a real grade once game_status is 'final' — a true void (no
  * box-score row at all, e.g. an unresolved vendor name) renders as its
  * own neutral "Void" badge instead of ever falling back to LeanBadge.
+ *
+ * FIXED 2026-09-18 ("Unders showing green is confusing" report) — every
+ * real grade originally shared one positive/green token regardless of
+ * direction, so an Under card looked identical to an Over card at a
+ * glance. FinalResultBadge now colors by GRADE_VARIANT (over/scored
+ * green, under/no-TD red, push/void neutral gray) — same over-vs-under
+ * color convention LEAN_BADGE already uses pregame, just carried through
+ * to the final grade.
  */
 
 const CURRENT_SEASON = 2026;
@@ -87,12 +94,9 @@ function LeanBadge({ lean }) {
 // Grades a final game's prop the same way OddsBadge.jsx's gradeSpread/
 // gradeTotal/gradeMoneyline grade game odds: describe the outcome that
 // actually happened against the locked line, not whether a prediction
-// was right. hit: true is the normal "this is what happened" case
-// (rendered in the positive token below); hit: null covers both an
-// exact push AND a genuine void, same neutral treatment OddsBadge gives
-// a push/tie — FinalResultBadge doesn't distinguish them by color, only
-// by label. Returns null (falls back to the pregame LeanBadge) ONLY when
-// the game isn't final yet.
+// was right — this is not a grade of whether the pregame lean called it
+// correctly, just "what hit." Returns null (falls back to the pregame
+// LeanBadge) ONLY when the game isn't final yet.
 //
 // FIXED 2026-09-18 ("TOSS-UP badges never finalize" report): once a
 // game is final this now ALWAYS returns a grade, never null — a final
@@ -105,36 +109,52 @@ function LeanBadge({ lean }) {
 // genuine void: no box-score row at all for this player in this game
 // (DNP, inactive, or an unresolved vendor name match) — rendered as a
 // distinct "Void" badge rather than silently reusing the pregame look.
+//
+// FIXED 2026-09-18 ("Unders showing green is confusing" report): every
+// real outcome used to render in the same positive/green token — an
+// Under looked identical to an Over at a glance, just with a different
+// letter buried in the label. GRADE_VARIANT below now colors by the
+// direction of the actual outcome (over/scored green, under/no-TD red),
+// same "over vs. under" color convention LEAN_BADGE above already uses
+// pregame — push/void stay neutral gray either way, since neither is a
+// real over/under outcome.
+const GRADE_VARIANT = {
+  over: { className: 'text-positive bg-positive/12', check: true },
+  scored: { className: 'text-positive bg-positive/12', check: true },
+  under: { className: 'text-negative bg-negative/12', check: true },
+  no_td: { className: 'text-negative bg-negative/12', check: true },
+  push: { className: 'text-ink-dim bg-surface-2', check: false },
+  void: { className: 'text-ink-dim bg-surface-2', check: false },
+};
+
 function gradeProp(prop) {
   if (prop.game_status !== 'final') return null;
 
   if (prop.final_value == null) {
-    return { label: 'Void — no box score', hit: null };
+    return { label: 'Void — no box score', variant: 'void' };
   }
 
   if (prop.market === 'player_anytime_td') {
     const scored = prop.final_value > 0;
-    return { label: scored ? 'Scored a TD' : 'No TD', hit: true };
+    return scored
+      ? { label: 'Scored a TD', variant: 'scored' }
+      : { label: 'No TD', variant: 'no_td' };
   }
 
-  if (prop.line == null) return { label: 'Void — no line', hit: null };
+  if (prop.line == null) return { label: 'Void — no line', variant: 'void' };
   const line = Number(prop.line);
   const actual = prop.final_value;
-  if (actual === line) return { label: `${prop.line} (Push)`, hit: null };
-  return {
-    label: actual > line ? `O ${prop.line} (${actual})` : `U ${prop.line} (${actual})`,
-    hit: true,
-  };
+  if (actual === line) return { label: `${prop.line} (Push)`, variant: 'push' };
+  return actual > line
+    ? { label: `O ${prop.line} (${actual})`, variant: 'over' }
+    : { label: `U ${prop.line} (${actual})`, variant: 'under' };
 }
 
 function FinalResultBadge({ grade }) {
+  const { className, check } = GRADE_VARIANT[grade.variant];
   return (
-    <span
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold tabular-nums ${
-        grade.hit ? 'text-positive bg-positive/12' : 'text-ink-dim bg-surface-2'
-      }`}
-    >
-      {grade.hit ? '✓ ' : ''}
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold tabular-nums ${className}`}>
+      {check ? '✓ ' : ''}
       {grade.label}
     </span>
   );
