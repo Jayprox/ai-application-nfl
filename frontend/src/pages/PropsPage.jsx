@@ -41,6 +41,21 @@ import AsyncState from '../components/AsyncState';
  * "hit" token OddsBadge/EdgeBadge already use elsewhere in this app —
  * not a grade of whether our own pregame lean called it right, just
  * "what hit," same framing OddsBadge uses for spread/total/moneyline.
+ *
+ * FIXED 2026-09-18 ("TOSS-UP badges never finalize" report) — a final
+ * game whose grade came back ambiguous (final_value null) fell all the
+ * way back to the pregame LeanBadge, so a finished game could still show
+ * an amber TOSS-UP chip indistinguishable from one that hadn't kicked
+ * off. Root cause was one level down, in props.js: a player's box-score
+ * row existing was being conflated with every column on it being
+ * non-null, when Highlightly's real box scores omit a whole stat group
+ * for a player who recorded nothing in it rather than reporting an
+ * explicit 0 (confirmed against Brock Wright's real DET@BUF box score —
+ * a General-only line from 1 recovered fumble, zero Receiving group,
+ * because he had zero targets that game). gradeProp() below now always
+ * returns a real grade once game_status is 'final' — a true void (no
+ * box-score row at all, e.g. an unresolved vendor name) renders as its
+ * own neutral "Void" badge instead of ever falling back to LeanBadge.
  */
 
 const CURRENT_SEASON = 2026;
@@ -73,19 +88,36 @@ function LeanBadge({ lean }) {
 // gradeTotal/gradeMoneyline grade game odds: describe the outcome that
 // actually happened against the locked line, not whether a prediction
 // was right. hit: true is the normal "this is what happened" case
-// (rendered in the positive token below); hit: null is only for an
-// exact push, same neutral treatment OddsBadge gives a push/tie. Returns
-// null when the game isn't final yet, or final_value came back null
-// (DNP/no data — see backend/routes/props.js's own comment on that).
+// (rendered in the positive token below); hit: null covers both an
+// exact push AND a genuine void, same neutral treatment OddsBadge gives
+// a push/tie — FinalResultBadge doesn't distinguish them by color, only
+// by label. Returns null (falls back to the pregame LeanBadge) ONLY when
+// the game isn't final yet.
+//
+// FIXED 2026-09-18 ("TOSS-UP badges never finalize" report): once a
+// game is final this now ALWAYS returns a grade, never null — a final
+// game showing the pregame TOSS-UP/OVER/UNDER LeanBadge was the actual
+// bug being reported, since that badge is visually indistinguishable
+// from a game still in progress. backend/routes/props.js's final_value
+// already COALESCEs a real box-score row's missing column to 0 (see its
+// own comment — Highlightly omits a whole stat group rather than
+// reporting an explicit 0), so final_value == null at this point means a
+// genuine void: no box-score row at all for this player in this game
+// (DNP, inactive, or an unresolved vendor name match) — rendered as a
+// distinct "Void" badge rather than silently reusing the pregame look.
 function gradeProp(prop) {
-  if (prop.game_status !== 'final' || prop.final_value == null) return null;
+  if (prop.game_status !== 'final') return null;
+
+  if (prop.final_value == null) {
+    return { label: 'Void — no box score', hit: null };
+  }
 
   if (prop.market === 'player_anytime_td') {
     const scored = prop.final_value > 0;
     return { label: scored ? 'Scored a TD' : 'No TD', hit: true };
   }
 
-  if (prop.line == null) return null;
+  if (prop.line == null) return { label: 'Void — no line', hit: null };
   const line = Number(prop.line);
   const actual = prop.final_value;
   if (actual === line) return { label: `${prop.line} (Push)`, hit: null };

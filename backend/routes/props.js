@@ -168,9 +168,31 @@ async function attachContext(rows, season) {
     // same gate OddsBadge.jsx uses ("status === 'final'") before grading
     // anything. Distinct from the recent_avg/td_rate context below (which
     // always covers the player's last 5 PAST games, an over-time trend),
-    // this is the ONE specific game this prop is for. No row (DNP,
-    // inactive, vendor gap) leaves final_value null — same "can't grade,
-    // don't guess" stance grade_picks' own void case takes.
+    // this is the ONE specific game this prop is for. No ROW AT ALL (DNP,
+    // inactive, unresolved vendor name) leaves final_value null — same
+    // "can't grade, don't guess" stance grade_picks' own void case takes.
+    //
+    // FIXED 2026-09-18 ("TOSS-UP badges never finalize" report): a row
+    // existing is not the same as every column on it being non-null —
+    // Highlightly's box score OMITS an entire stat group (Passing/
+    // Rushing/Receiving/General) for a player rather than reporting an
+    // explicit 0, whenever that player recorded nothing in it. CONFIRMED
+    // directly against the real DET@BUF 2026-09-18 box score: TE Brock
+    // Wright's entry carries only a General group (0 fumbles, 1 recovered
+    // fumble) — no Receiving group at all, because he had zero targets —
+    // so his player_offense_game_stats row exists (the General stat
+    // created it) but targets/receptions/receiving_yards all land NULL,
+    // not because we don't know his receiving line, but because it's
+    // genuinely 0. The old code treated that column-level NULL the same
+    // as "no row" and left final_value null, so the card fell back to the
+    // pregame TOSS-UP LeanBadge forever — indistinguishable from a game
+    // that hadn't started. Now COALESCEd to 0 here, same as the
+    // anytime_td branch already did for exactly this reason (its rushing_
+    // tds/receiving_tds/passing_tds COALESCE was already correct — this
+    // just brings the other 4 markets in line with it). A genuinely
+    // unresolved player (no row at all — no stat category matched him in
+    // this game) still leaves final_value null and still renders as a
+    // real void state, not a false Under.
     let finalValue = null;
     if (r.game_status === 'final') {
       if (r.market === 'player_anytime_td') {
@@ -182,10 +204,10 @@ async function attachContext(rows, season) {
         finalValue = finalRows.length ? (Number(finalRows[0].value) > 0 ? 1 : 0) : null;
       } else if (MARKET_STAT_COLUMN[r.market]) {
         const { rows: finalRows } = await query(
-          `SELECT ${MARKET_STAT_COLUMN[r.market]} AS value FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
+          `SELECT COALESCE(${MARKET_STAT_COLUMN[r.market]}, 0) AS value FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
           [r.game_id, r.player_id]
         );
-        finalValue = finalRows.length && finalRows[0].value !== null ? Number(finalRows[0].value) : null;
+        finalValue = finalRows.length ? Number(finalRows[0].value) : null;
       }
     }
     base.final_value = finalValue;
