@@ -2047,6 +2047,24 @@ async function getCurrentWeekForProps() {
 // vendor doesn't say which side a prop's player is on either -- only
 // resolveIdentity()'s box-score cousin knows the team per row, because
 // that vendor (Highlightly) does report it.
+//
+// FIXED 2026-09-18: this lacked resolvePlayerForBoxScore()'s suffix-strip
+// fallback, so any player The Odds API reported with a Jr./Sr./II/III/IV
+// mismatch against our own roster data silently had every prop dropped.
+// A "no player match" log sample flagged 11 names; verified against real
+// players table rows that 5 were genuine suffix mismatches this fix
+// resolves -- Brian Thomas Jr (vendor) / "Brian Thomas Jr." (ours), Kevin
+// Coleman Jr. / "Kevin Coleman", Mike Washington Jr. / "Mike Washington",
+// Montorie Foster Jr. / "Montorie Foster Jr", Thomas Fidone / "Thomas
+// Fidone II". The other 6 in that sample are NOT suffix mismatches and
+// are untouched by this fix: DJ Herman / CJ Williams / CJ Daniels are a
+// separate punctuation-in-initials pattern (ours store "D.J."/"C.J.");
+// Drew Ogletree is a nickname mismatch ("Andrew Ogletree" in our data);
+// James Jordan and Bam Knight aren't in the players table under any
+// spelling found, so likely unrostered rather than a name bug. Ported
+// the same stripGenerationalSuffix() retry-on-zero-match used above,
+// adapted for this function's two-team (home/away) match clause instead
+// of one team_id.
 async function resolvePlayerForProp(fullName, homeTeamId, awayTeamId, cache) {
   const sourcePlayerId = `${fullName}|${homeTeamId}|${awayTeamId}`;
   if (cache.has(sourcePlayerId)) return cache.get(sourcePlayerId);
@@ -2060,10 +2078,26 @@ async function resolvePlayerForProp(fullName, homeTeamId, awayTeamId, cache) {
     return crosswalked[0].player_id;
   }
 
-  const { rows: matches } = await pool.query(
+  let { rows: matches } = await pool.query(
     `SELECT player_id FROM players WHERE lower(full_name) = lower($1) AND current_team_id IN ($2, $3) LIMIT 2`,
     [fullName, homeTeamId, awayTeamId]
   );
+
+  // Fallback: a clean exact match found nothing — retry with a trailing
+  // generational suffix stripped from both sides (see
+  // stripGenerationalSuffix() / resolvePlayerForBoxScore() above — same
+  // fix, same reasoning, ported here 2026-09-18). Only tried on a genuine
+  // zero-match, not an ambiguous one.
+  if (matches.length === 0) {
+    const normalizedFullName = stripGenerationalSuffix(fullName);
+    ({ rows: matches } = await pool.query(
+      `SELECT player_id FROM players
+       WHERE lower(regexp_replace(full_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV)$', '', 'i')) = lower($1)
+         AND current_team_id IN ($2, $3) LIMIT 2`,
+      [normalizedFullName, homeTeamId, awayTeamId]
+    ));
+  }
+
   if (matches.length !== 1) {
     console.warn(
       `[job:sync_player_props] ${matches.length === 0 ? 'no' : 'ambiguous'} player match for "${fullName}" (teams ${homeTeamId}/${awayTeamId}) — skipping this prop`

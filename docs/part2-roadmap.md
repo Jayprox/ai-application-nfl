@@ -589,38 +589,45 @@ here ("Phase 3 — scope and timing not yet decided") was deleted outright
 rather than moved: Phase 3 is marked "Status: done" above, so that line
 was simply stale, not a real open item.
 
-Re-ordered 2026-09-18: the Swift iOS app is next up per explicit
-direction ("after this phase we can work on a draft to bring over to a
-chat for the Chalk That NFL iOS app") — moved to the top of the ordered
-list. Everything else below it is real, scoped, and reviewable, but not
-next in line.
+Re-ordered 2026-09-18, twice: first to put the Swift iOS app at the top
+per explicit direction, then moved back to the bottom per a follow-up
+call ("move the swift app to the bottom, then let's work down the
+list") — the smaller, already-scoped backend/data items go first;
+drafting the iOS app is the last thing in this list, not the first.
 
-1. **Swift iOS app.** Next up. Also Part 1 MVP backlog — "web ships
-   first, same API, no rework needed later." The API surface (`/query`,
-   `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
-   `/picks`, chat) is the same one a native client would call; no
-   backend rework anticipated before drafting the iOS plan.
-2. **`resolvePlayerForProp()` has no suffix-normalization fallback —
-   found 2026-09-18, not yet fixed.** CONFIRMED via real
+1. **`resolvePlayerForProp()` has no suffix-normalization fallback —
+   found 2026-09-18, fixed 2026-09-18.** CONFIRMED via real
    `sync_player_props` production logs (2026-09-18): real players with a
    generational suffix mismatch between The Odds API's naming and our
    roster are being silently dropped from Player Props — same bug class
    as the James Cook box-score fix above (`ceb7f42`), but that fix only
    landed in `resolvePlayerForBoxScore()`; its sibling
    `resolvePlayerForProp()` (same file, used by `sync_player_props`)
-   still does a plain exact-match comparison with no
-   `stripGenerationalSuffix()` fallback. Real players confirmed dropped
-   in one day's logs: Brian Thomas Jr, Kevin Coleman Jr., Mike Washington
-   Jr., Montorie Foster Jr. — likely others across a full slate.
+   still did a plain exact-match comparison with no
+   `stripGenerationalSuffix()` fallback. Fixed by porting the same
+   `stripGenerationalSuffix()` retry-on-zero-match fallback, adapted for
+   this function's two-team (home/away) match clause.
+   **Verified against real data, not just the log sample:** of the names
+   a "no player match" log sample flagged, 5 were genuine suffix
+   mismatches this fix resolves (confirmed directly against the
+   `players` table — exact match fails, the new fallback finds exactly
+   one row): Brian Thomas Jr → "Brian Thomas Jr.", Kevin Coleman Jr. →
+   "Kevin Coleman", Mike Washington Jr. → "Mike Washington", Montorie
+   Foster Jr. → "Montorie Foster Jr", Thomas Fidone → "Thomas Fidone II".
+   **Not fixed by this, and not a suffix issue — worth their own look
+   later:** DJ Herman / CJ Williams / CJ Daniels are a different bug —
+   our data stores these with periods ("D.J. Herman", "C.J. Williams",
+   "C.J. Daniels"), a punctuation mismatch, not a suffix one; Drew
+   Ogletree is a nickname mismatch ("Andrew Ogletree" in our data); James
+   Jordan and Bam Knight aren't in the `players` table under any spelling
+   checked, so more likely unrostered than a name-matching bug.
    **Not a bug, for contrast:** most of that same log's "no player
    match" lines are expected, not a defect — The Odds API's
    `player_anytime_td` market includes team-defense outcomes ("Kansas
    City Chiefs D/ST") and a synthetic "No Scorer" outcome alongside real
    players, none of which have (or should have) a `players` row;
    `resolvePlayerForProp()` correctly skips them rather than guessing.
-   Small, well-scoped, same fix shape as the already-shipped one —
-   reasonable to pull off the backlog and fix directly rather than wait.
-3. **Drive events (play-by-play) for live games.** Split out from the
+2. **Drive events (play-by-play) for live games.** Split out from the
    original "fuller live gamecast view" item once the box score/top-
    performers half of it shipped (2026-09-17) — see Phase 5 above for
    why this half is explicitly NOT scoped yet: no confirmed data source
@@ -628,13 +635,13 @@ next in line.
    `/matches/{id}` response has something nobody's checked for, or
    sourcing a different vendor entirely) before this can even be sized,
    let alone built.
-4. **Game props (team totals, alt lines).** The deliberate follow-up
+3. **Game props (team totals, alt lines).** The deliberate follow-up
    noted in Player Props' own original commit message (`9dd9ef5`,
    2026-09-17) — same `game_odds` pattern `sync_odds`/`routes/odds.js`
    already use, extended to alt lines/team totals rather than just the
    featured h2h/spread/total market. Not started; Player Props (this
    phase) came first on purpose.
-5. **Additional player-prop markets beyond the 5 launch markets.** The
+4. **Additional player-prop markets beyond the 5 launch markets.** The
    Odds API offers more player markets than `PLAYER_PROP_MARKETS`
    currently pulls (e.g. pass attempts/completions/interceptions,
    longest reception, sacks) — deliberately curated narrow at launch
@@ -642,15 +649,15 @@ next in line.
    `worker/ingestion-worker.js`) to bound API credit cost before real
    usage was visible. Worth revisiting now that Player Props has run
    through a real live game.
-6. **`sync_player_props` credit-usage check.** Its own header comment
+5. **`sync_player_props` credit-usage check.** Its own header comment
    already flags this as "a starting point, not settled — revisit once
    real credit usage is visible." That real usage is visible now (this
    phase shipped and ran through DET@BUF 2026-09-18) — worth an actual
    check of The Odds API's remaining monthly credits against
-   `sync_odds`'s existing budget before either scaling up markets (#5)
-   or adding Game props (#4), both of which would add more per-event
+   `sync_odds`'s existing budget before either scaling up markets (#4)
+   or adding Game props (#3), both of which would add more per-event
    calls on top of this job's existing one-call-per-game-per-week cost.
-7. **Delete 5 leftover Railway services.** Not urgent — dashboard
+6. **Delete 5 leftover Railway services.** Not urgent — dashboard
    cleanup only, none of these affect the live app. Diagnostic/temp
    services created during debugging sessions that `delete-service`
    couldn't remove (the tool call times out at 180s, a known systemic
@@ -666,6 +673,13 @@ next in line.
    calling the wrong Railway tool while the MCP connection was
    reconnecting. Delete all 5 manually from the Railway dashboard
    whenever convenient.
+7. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+   API, no rework needed later." The API surface (`/query`,
+   `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
+   `/picks`, chat) is the same one a native client would call; no
+   backend rework anticipated before drafting the iOS plan. Moved to the
+   bottom of this list 2026-09-18 — the smaller backend/data items above
+   go first, this comes once they're worked through.
 
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the

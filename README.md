@@ -105,19 +105,6 @@ still genuinely open.
 maintained list; this is a shorter pointer version for anyone starting
 from the README.*
 
-- **No iOS app yet.** Next up — the same `backend-api` surface a browser
-  client calls (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,
-  `/portfolio`, `/picks`, the chat agent's routes) is what a native client
-  would call too, so no backend rework is anticipated before drafting the
-  iOS plan.
-- **One real, scoped bug still open in Player Props:**
-  `resolvePlayerForProp()` (`worker/ingestion-worker.js`) has no
-  suffix-normalization fallback, so a real player whose name carries a
-  generational suffix mismatch (Jr./Sr./II/III/IV) between The Odds API
-  and this app's own roster is silently dropped from the Props board —
-  confirmed in real production logs 2026-09-18. Its sibling function,
-  `resolvePlayerForBoxScore()`, already has this fix; it was never
-  ported over. See `docs/part2-roadmap.md`'s Backlog for detail.
 - **Game props (team totals, alt lines) not built yet** — a deliberate,
   scoped-out follow-up to Player Props, same `game_odds` pattern
   `sync_odds`/`routes/odds.js` already use.
@@ -125,6 +112,12 @@ from the README.*
   source yet — nflverse is batch/historical only, and no live vendor's
   play-by-play field has actually been checked for. Needs real vendor
   research before it can even be sized.
+- **No iOS app yet.** Last in the ordered backlog (`docs/part2-roadmap.md`)
+  on purpose — the same `backend-api` surface a browser client calls
+  (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,
+  `/portfolio`, `/picks`, the chat agent's routes) is what a native
+  client would call too, so no backend rework is anticipated once this
+  comes up.
 - **No automated test suite.** Everything was verified through manual
   dry-runs and live browser stress-testing (see Phase 6 in
   `docs/vibe-coding-checklist.md` for Part 1, `docs/part2-roadmap.md` for
