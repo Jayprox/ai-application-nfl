@@ -1455,6 +1455,22 @@ async function getLiveGames() {
   return rows;
 }
 
+// Strips a trailing generational suffix so a vendor name that carries
+// one (or doesn't) can still match our own `players.full_name`, whichever
+// side has it. CONFIRMED real gap 2026-09-18: Highlightly reported BUF's
+// James Cook as "James Cook III" for an entire live game — our own roster
+// data has him as plain "James Cook" — and resolvePlayerForBoxScore()'s
+// exact-match-only comparison never found him on any poll tick, silently
+// dropping his whole box score line every time (its existing "skip rather
+// than guess" design, unchanged — see that function's own comment). Same
+// tick's logs also showed Joshua Palmer, TJ Parker, Tommy Doman Jr., Mike
+// Danna, and DJ Wonnum consistently unmatched — worth another look if any
+// of those turn out NOT to be a suffix mismatch (e.g. a genuinely
+// unrostered call-up Highlightly knows about before sync_roster does).
+function stripGenerationalSuffix(name) {
+  return (name || '').replace(/\s+(Jr\.?|Sr\.?|II|III|IV)$/i, '').trim();
+}
+
 // Box-score player resolution: unlike resolveIdentity(), this does NOT
 // insert a new players row on an ambiguous/missing name match (no
 // position data is available here to disambiguate — see file header).
@@ -1474,10 +1490,27 @@ async function resolvePlayerForBoxScore(vendorPlayerId, fullName, teamId, cache)
     return crosswalked[0].player_id;
   }
 
-  const { rows: matches } = await pool.query(
+  let { rows: matches } = await pool.query(
     `SELECT player_id FROM players WHERE lower(full_name) = lower($1) AND current_team_id = $2 LIMIT 2`,
     [fullName, teamId]
   );
+
+  // Fallback: a clean exact match found nothing — retry comparing both
+  // sides with a trailing generational suffix stripped (see
+  // stripGenerationalSuffix() above), in case Highlightly's name has one
+  // ours doesn't, or ours has one Highlightly's doesn't. Only tried on a
+  // genuine zero-match, not an ambiguous one — a suffix strip can't
+  // resolve an ambiguity between two already-real candidates.
+  if (matches.length === 0) {
+    const normalizedFullName = stripGenerationalSuffix(fullName);
+    ({ rows: matches } = await pool.query(
+      `SELECT player_id FROM players
+       WHERE lower(regexp_replace(full_name, '\\s+(Jr\\.?|Sr\\.?|II|III|IV)$', '', 'i')) = lower($1)
+         AND current_team_id = $2 LIMIT 2`,
+      [normalizedFullName, teamId]
+    ));
+  }
+
   if (matches.length !== 1) {
     console.warn(
       `[job:sync_live_stats] ${matches.length === 0 ? 'no' : 'ambiguous'} player match for "${fullName}" (team_id ${teamId}) — skipping this stat line`
