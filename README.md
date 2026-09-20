@@ -126,12 +126,15 @@ from the README.*
   decided against for this app — that kind of predictive modeling is
   left to external tooling built on top of the API, not the core
   pipeline. See `docs/part2-roadmap.md`'s Backlog item 8.
-- **No iOS app yet.** Last in the ordered backlog (`docs/part2-roadmap.md`)
-  on purpose — the same `backend-api` surface a browser client calls
+- **iOS app — underway, started 2026-09-20, tracked separately.** Was
+  last in the ordered backlog (`docs/part2-roadmap.md`) on purpose,
+  cleared from that list now that the smaller backend/data items ahead
+  of it shipped. The same `backend-api` surface a browser client calls
   (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,
-  `/portfolio`, `/picks`, the chat agent's routes) is what a native
-  client would call too, so no backend rework is anticipated once this
-  comes up.
+  `/portfolio`, `/picks`, the chat agent's routes) is what the native
+  client calls too — no backend rework was needed to start it. Building
+  off the already-finalized brief (`chalk-that-nfl-ios-brief.md`) as its
+  own effort outside this repo.
 - **No automated test suite.** Everything was verified through manual
   dry-runs and live browser stress-testing (see Phase 6 in
   `docs/vibe-coding-checklist.md` for Part 1, `docs/part2-roadmap.md` for

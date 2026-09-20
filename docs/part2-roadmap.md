@@ -772,13 +772,18 @@ drafting the iOS app is the last thing in this list, not the first.
    calling the wrong Railway tool while the MCP connection was
    reconnecting. Delete all 5 manually from the Railway dashboard
    whenever convenient.
-10. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
-   API, no rework needed later." The API surface (`/query`,
-   `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
-   `/picks`, chat) is the same one a native client would call; no
-   backend rework anticipated before drafting the iOS plan. Moved to the
-   bottom of this list 2026-09-18 — the smaller backend/data items above
-   go first, this comes once they're worked through.
+10. **Swift iOS app — cleared from this backlog, started 2026-09-20.**
+   Also Part 1 MVP backlog — "web ships first, same API, no rework
+   needed later." The API surface (`/query`, `/props/players`, `/odds`,
+   `/edge`, `/rankings`, `/portfolio`, `/picks`, chat) is the same one a
+   native client would call; no backend rework was needed before
+   drafting the iOS plan. Moved to the bottom of this list 2026-09-18 so
+   the smaller backend/data items above went first; those are now worked
+   through (items 1-9 all shipped or explicitly decided against), and
+   the iOS build itself is underway as its own separate effort outside
+   this repo's backlog, off the already-finalized brief
+   (`chalk-that-nfl-ios-brief.md`) — no longer tracked as an open item
+   here.
 
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
