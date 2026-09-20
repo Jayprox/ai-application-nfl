@@ -303,6 +303,63 @@ function TopPerformers({ offenseRows }) {
   );
 }
 
+// Drive Feed (2026-09-20, Part 2 backlog item 2 — docs/part2-roadmap.md):
+// renders game_drives rows most-recent-drive-first (a live gamecast reads
+// bottom-up in real life — the newest drive is what a viewer refreshing
+// mid-game actually wants at the top), each with its playDetails list
+// rendered as-is. down/distance/possessionText come straight off the
+// vendor's own playDetails[].start object — same "translation, not
+// computation" rule as the rest of this app, nothing here is derived or
+// estimated.
+function ordinalDown(n) {
+  if (n == null) return null;
+  return { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' }[n] ?? `${n}th`;
+}
+
+function DriveFeed({ drives }) {
+  const ordered = [...drives].reverse();
+  return (
+    <div className="space-y-3">
+      {ordered.map((d) => (
+        <div
+          key={d.drive_id}
+          className={`rounded-md border p-3 ${
+            d.is_scoring_play ? 'border-positive/50 bg-positive/5' : 'border-line bg-surface'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 text-sm">
+            <span className="font-medium text-ink">{d.team_abbr} drive</span>
+            <span className="text-right text-ink-dim">
+              {d.result ?? 'In progress'}
+              {d.description ? ` · ${d.description}` : ''}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            {[d.start_period, d.start_clock].filter(Boolean).join(' ')}
+            {d.start_yard_line != null ? ` · started at ${d.start_yard_line}` : ''}
+            {d.end_yard_line != null ? ` → ended at ${d.end_yard_line}` : ''}
+          </p>
+          {Array.isArray(d.play_details) && d.play_details.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs text-ink-dim">
+              {d.play_details.map((p, i) => (
+                <li key={i}>
+                  {p.start?.down != null && (
+                    <span className="text-ink-faint">
+                      {ordinalDown(p.start.down)} &amp; {p.start.distance} at {p.start.possessionText}
+                      {' — '}
+                    </span>
+                  )}
+                  {p.text}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BoxScoreCategoryTable({ category, rows }) {
   const filtered = nonZeroRows(rows, category.filterKeys);
   if (filtered.length === 0) return null;
@@ -364,6 +421,9 @@ export default function GameDetailPage() {
   // stale on the same "game is in_progress" condition the score/clock
   // do, so it reuses that state rather than deriving its own.
   const { data: boxscoreData } = useApiFetch(`/games/${gameId}/boxscore`, { pollMs: livePollMs });
+  // Same livePollMs as boxscore above -- a live drive feed goes stale on
+  // the same "game is in_progress" condition.
+  const { data: drivesData } = useApiFetch(`/games/${gameId}/drives`, { pollMs: livePollMs });
   const [activeSide, setActiveSide] = useState('away');
   // Player Stats section's own toggles — deliberately separate state
   // from Live Box Score's activeSide above, since a reader may well
@@ -413,6 +473,9 @@ export default function GameDetailPage() {
   const boxscoreSampleSize = boxscoreData?.meta?.sample_size ?? 0;
   const boxscoreSyncedAtLabel = formatSyncedAt(boxscoreData?.meta?.freshness);
   const activeBoxscoreSide = boxscore ? (activeSide === 'away' ? boxscore.away : boxscore.home) : null;
+
+  const drives = drivesData?.data ?? [];
+  const drivesSyncedAtLabel = formatSyncedAt(drivesData?.meta?.freshness);
 
   const playerStats = playerStatsData?.data;
   const playerStatsSampleSize = playerStatsData?.meta?.sample_size ?? 0;
@@ -645,6 +708,27 @@ export default function GameDetailPage() {
               {boxscoreSyncedAtLabel && (
                 <p className="mt-2 text-xs text-ink-faint">
                   Box score as of {boxscoreSyncedAtLabel}
+                  {game.status === 'in_progress' ? ' — updates every few minutes while the game is live.' : ''}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-2">Drive Feed</h2>
+          {drives.length === 0 ? (
+            <p className="text-sm text-ink-dim">
+              {game.status === 'scheduled'
+                ? 'Drive feed available once the game kicks off.'
+                : 'No drives synced yet for this game.'}
+            </p>
+          ) : (
+            <div>
+              <DriveFeed drives={drives} />
+              {drivesSyncedAtLabel && (
+                <p className="mt-2 text-xs text-ink-faint">
+                  Drives as of {drivesSyncedAtLabel}
                   {game.status === 'in_progress' ? ' — updates every few minutes while the game is live.' : ''}
                 </p>
               )}

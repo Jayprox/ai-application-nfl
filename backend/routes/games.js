@@ -72,6 +72,15 @@
  *                              season_total math exactly, not a
  *                              reimplementation) in the same statement so
  *                              each row already carries both.
+ * GET /games/:gameId/drives — drive-by-drive play-by-play, one row per
+ *                              possession, split into home/away by
+ *                              team_id, each carrying the vendor's own
+ *                              playDetails array (down/distance/yardLine/
+ *                              play type/text) verbatim as JSONB
+ *                              (2026-09-20, Part 2 backlog item 2 — see
+ *                              db/migrations/014_drive_events.sql). Same
+ *                              null-data-not-404 "hasn't kicked off yet"
+ *                              norm as boxscore above.
  *
  * This is the "front door" data source for Part 2 Phase 3's Games/Slate
  * page (docs/part2-roadmap.md) — a sportsbook-scoreboard-style week view
@@ -392,6 +401,52 @@ router.get('/:gameId/player-stats', async (req, res) => {
   } catch (err) {
     if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
     console.error('[routes/games] player-stats lookup failed:', err);
+    res.status(500).json({ error: 'internal error' });
+  }
+});
+
+// GET /games/:gameId/drives — drive-by-drive play-by-play, one row per
+// possession, ordered by drive_sequence. Part 2 backlog item 2 (docs/
+// part2-roadmap.md), confirmed live 2026-09-20 via the same /matches/{id}
+// Highlightly endpoint the injuries route's data already comes from —
+// see db/migrations/014_drive_events.sql and worker/ingestion-worker.js's
+// syncDriveEvents() for the full vendor-shape writeup. play_details is
+// returned verbatim (JSONB, the vendor's own playDetails array) — same
+// "translation, not computation" principle as the rest of this app: the
+// frontend renders the vendor's own play text/down/distance/yardLine
+// fields directly, this route doesn't re-derive anything from them.
+// Same null-data-not-404 "hasn't kicked off yet" norm as boxscore above.
+router.get('/:gameId/drives', async (req, res) => {
+  const { gameId } = req.params;
+  try {
+    const { rows: gameRows } = await query(
+      `SELECT status FROM games WHERE game_id = $1`,
+      [gameId]
+    );
+    const game = gameRows[0];
+    if (!game) return res.status(404).json({ error: 'game not found' });
+
+    if (game.status === 'scheduled') {
+      return res.json({ data: null, meta: { reason: 'game has not started yet' } });
+    }
+
+    const { rows } = await query(
+      `SELECT gd.drive_id, gd.team_id, t.abbreviation AS team_abbr, gd.drive_sequence,
+              gd.start_period, gd.start_clock, gd.start_yard_line,
+              gd.end_period, gd.end_clock, gd.end_yard_line,
+              gd.result, gd.description, gd.is_scoring_play, gd.play_details
+       FROM game_drives gd
+       JOIN teams t ON t.team_id = gd.team_id
+       WHERE gd.game_id = $1
+       ORDER BY gd.drive_sequence`,
+      [gameId]
+    );
+
+    const freshness = await getFreshness('sync_drive_events');
+    res.json({ data: rows, meta: { count: rows.length, freshness } });
+  } catch (err) {
+    if (err.code === '22P02') return res.status(404).json({ error: 'game not found' });
+    console.error('[routes/games] drives lookup failed:', err);
     res.status(500).json({ error: 'internal error' });
   }
 });

@@ -627,15 +627,44 @@ drafting the iOS app is the last thing in this list, not the first.
    City Chiefs D/ST") and a synthetic "No Scorer" outcome alongside real
    players, none of which have (or should have) a `players` row;
    `resolvePlayerForProp()` correctly skips them rather than guessing.
-2. **Drive events (play-by-play) for live games.** Split out from the
-   original "fuller live gamecast view" item once the box score/top-
-   performers half of it shipped (2026-09-17) — see Phase 5 above for
-   why this half is explicitly NOT scoped yet: no confirmed data source
-   exists. Needs real vendor research (either confirming Highlightly's
-   `/matches/{id}` response has something nobody's checked for, or
-   sourcing a different vendor entirely) before this can even be sized,
-   let alone built.
-3. **Game props: team totals — shipped 2026-09-18.** The deliberate
+2. **Drive events (play-by-play) for live games — shipped 2026-09-20.**
+   Split out from the original "fuller live gamecast view" item once the
+   box score/top-performers half of it shipped (2026-09-17); paused until
+   a real Sunday made this checkable against live data. Resolved the
+   "no confirmed data source exists" blocker live, mid-game (CIN@HOU,
+   2nd quarter): the SAME `/matches/{id}` Highlightly endpoint the
+   injuries route already reads carries a real `events` array — one
+   entry per drive/possession (team, start/end clock+period+yardLine, a
+   result like "Punt"/"Touchdown"/"Downs", a "3 plays, 6 yards, 1:05"
+   summary, isScoringPlay), each with a nested `playDetails` array giving
+   every individual play (down, distance, yardLine, yardsToEndzone, play
+   type, the human-readable play text). New `game_drives` table
+   (`db/migrations/014_drive_events.sql`, one row per drive, playDetails
+   kept as JSONB rather than a child table — same pattern
+   matchup_scores.breakdown already uses); new `sync_drive_events` worker
+   job (same game-window schedule and cost math as `sync_live_stats`,
+   confirmed live against 8 real concurrent games — 84 drives inserted,
+   zero errors); new `GET /games/:gameId/drives` route; new Drive Feed
+   section on `GameDetailPage.jsx`, most-recent-drive-first.
+3. **`sync_injury_reports` likely never actually records injuries —
+   found 2026-09-20, not fixed.** Discovered while confirming item 2
+   above, in a completely different job: `fetchHighlightly('/matches/
+   {id}')` actually returns an ARRAY of one match object, not a bare
+   object (confirmed live — `Array.isArray === true`, length 1).
+   `sync_injury_reports` (worker/ingestion-worker.js) reads
+   `detail.injuries` directly with no unwrapping, which is always
+   `undefined` on an array, so `detail.injuries || []` has silently
+   iterated an empty list on every single run since that job shipped —
+   meaning it has likely never recorded a real injury row this whole
+   time. Not fixed as part of item 2 above (out of scope, a decision for
+   whoever's asked, and touching a different already-shipped job without
+   being asked isn't this app's convention) — a one-line fix
+   (`detail.injuries` → `detail[0]?.injuries`, same unwrap
+   `syncDriveEvents()` now does) once someone signs off on it. Worth
+   checking the real `injury_reports` row count/dates first to confirm
+   the theory before fixing — this is reasoned from the code, not yet
+   directly confirmed against an empty table.
+4. **Game props: team totals — shipped 2026-09-18.** The deliberate
    follow-up noted in Player Props' own original commit message
    (`9dd9ef5`, 2026-09-17). Extends `game_odds` with a `team_totals`
    market (`db/migrations/013_team_totals_odds.sql`) rather than a new
@@ -651,7 +680,7 @@ drafting the iOS app is the last thing in this list, not the first.
    section) — the compact card badges (`OddsBadge`/`GameCard`) stay
    DraftKings-spread/total-only, unchanged, on purpose (deliberately
    terse, already busy).
-4. **Game props: alternate spreads/totals — split out, not started.**
+5. **Game props: alternate spreads/totals — split out, not started.**
    Deliberately NOT built alongside team totals above: confirmed live
    2026-09-18 that The Odds API's `alternate_spreads`/`alternate_totals`
    markets return MANY lines per bookmaker (every available point value)
@@ -660,7 +689,7 @@ drafting the iOS app is the last thing in this list, not the first.
    needs its own storage shape (one row per line, not per bookmaker) and
    probably its own UI (a line picker, not just another list entry).
    Real scoping work, not a quick extension of #3.
-5. **Additional player-prop markets beyond the 5 launch markets —
+6. **Additional player-prop markets beyond the 5 launch markets —
    decided against, closed 2026-09-18.** The Odds API offers more player
    markets than `PLAYER_PROP_MARKETS` currently pulls (e.g. pass
    attempts/completions/interceptions, longest reception, sacks), and
@@ -668,7 +697,7 @@ drafting the iOS app is the last thing in this list, not the first.
    through a real live game. Explicit call: the 5 launch markets are
    enough — not pursuing this. `PLAYER_PROP_MARKETS` stays as-is;
    revisit only if a real need for a specific market comes up later.
-6. **`sync_player_props`/`sync_odds` credit-usage check — done
+7. **`sync_player_props`/`sync_odds` credit-usage check — done
    2026-09-18.** Checked live before building #3 above (its own header
    comment flagged this as "a starting point, not settled — revisit once
    real credit usage is visible," and this app's own backlog said to do
@@ -677,9 +706,9 @@ drafting the iOS app is the last thing in this list, not the first.
    this billing cycle's requests still available (891 used) — real,
    plenty of headroom for `sync_team_totals`'s narrow per-event addition
    on top of what `sync_odds`/`sync_player_props` already spend. Revisit
-   again once alt lines (#4) or more player markets (#5) actually ship,
+   again once alt lines (#5) or more player markets (#6) actually ship,
    since either adds real per-event cost on top of this.
-7. **Props confidence signal — simulation model decided against, three
+8. **Props confidence signal — simulation model decided against, three
    deterministic enrichments identified instead. Not started.** Raised
    2026-09-18: Chalk That MLB's Board shows a Monte Carlo-based
    confidence score per prop (`src/scoring/sim.js` — a seeded ~500-trial
@@ -726,7 +755,7 @@ drafting the iOS app is the last thing in this list, not the first.
    this is query/aggregation work on data already being collected, not
    a new data source.
 
-8. **Delete 5 leftover Railway services.** Not urgent — dashboard
+9. **Delete 5 leftover Railway services.** Not urgent — dashboard
    cleanup only, none of these affect the live app. Diagnostic/temp
    services created during debugging sessions that `delete-service`
    couldn't remove (the tool call times out at 180s, a known systemic
@@ -742,7 +771,7 @@ drafting the iOS app is the last thing in this list, not the first.
    calling the wrong Railway tool while the MCP connection was
    reconnecting. Delete all 5 manually from the Railway dashboard
    whenever convenient.
-9. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
+10. **Swift iOS app.** Also Part 1 MVP backlog — "web ships first, same
    API, no rework needed later." The API surface (`/query`,
    `/props/players`, `/odds`, `/edge`, `/rankings`, `/portfolio`,
    `/picks`, chat) is the same one a native client would call; no

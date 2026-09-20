@@ -89,12 +89,12 @@ npm run dev                 # Vite dev server on :5173
 The ingestion worker (`npm run worker -- <jobType>` for a one-shot dry run,
 or `npm run worker` for the real scheduler) is optional for local dev — the
 historical backfill script covers everything needed to explore the app.
-All eleven job types are real and live: `sync_roster`, `sync_schedule`,
+All twelve job types are real and live: `sync_roster`, `sync_schedule`,
 `sync_historical_stats`, `sync_historical_weather` (nflverse),
 `sync_forecast_weather` (Open-Meteo), `sync_injury_reports`,
-`sync_live_stats`, `sync_live_scores` (Highlightly), `sync_odds`,
-`sync_player_props`, `sync_team_totals` (both The Odds API) — see Known
-limitations for what's still genuinely open.
+`sync_live_stats`, `sync_live_scores`, `sync_drive_events` (Highlightly),
+`sync_odds`, `sync_player_props`, `sync_team_totals` (both The Odds API)
+— see Known limitations for what's still genuinely open.
 
 ---
 
@@ -111,6 +111,13 @@ from the README.*
   The Odds API returns many lines per bookmaker for those, not one
   current line, so they need their own storage shape and probably their
   own UI. See `docs/part2-roadmap.md`'s Backlog.
+- **Drive events (play-by-play) for live games — shipped 2026-09-20.**
+  Confirmed live, mid-game: the same `/matches/{id}` Highlightly endpoint
+  the injuries route reads carries a real per-drive `events` array with a
+  nested `playDetails` list (down/distance/yardLine/play type/text) —
+  new `game_drives` table, `sync_drive_events` job, `GET /games/:gameId/
+  drives` route, and a Drive Feed section on GameDetailPage. See
+  `docs/part2-roadmap.md`'s Backlog item 2.
 - **Props real-signal enrichments not built yet** — historical hit
   rate, opponent-allowed context, and line movement, all identified
   2026-09-18 as ways to extend `/props/players` that stay within the
@@ -118,11 +125,14 @@ from the README.*
   Chalk That MLB-style Monte Carlo confidence score was explicitly
   decided against for this app — that kind of predictive modeling is
   left to external tooling built on top of the API, not the core
-  pipeline. See `docs/part2-roadmap.md`'s Backlog item 7.
-- **Drive events (play-by-play) for live games** have no confirmed data
-  source yet — nflverse is batch/historical only, and no live vendor's
-  play-by-play field has actually been checked for. Needs real vendor
-  research before it can even be sized.
+  pipeline. See `docs/part2-roadmap.md`'s Backlog item 8.
+- **`sync_injury_reports` likely never actually records injuries** —
+  found 2026-09-20 while confirming drive events (above):
+  `fetchHighlightly('/matches/{id}')` returns an array-wrapped match
+  object, and this job reads `detail.injuries` with no unwrapping, which
+  is always `undefined` on an array. Not fixed yet — a one-line fix, but
+  a decision for whoever's asked first. See `docs/part2-roadmap.md`'s
+  Backlog item 3.
 - **No iOS app yet.** Last in the ordered backlog (`docs/part2-roadmap.md`)
   on purpose — the same `backend-api` surface a browser client calls
   (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,

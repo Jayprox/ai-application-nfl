@@ -1652,6 +1652,114 @@ async function syncLiveStats() {
 }
 
 // ---------------------------------------------------------------------
+// Job body — sync_drive_events, REAL. Part 2 backlog item 2 (docs/part2-
+// roadmap.md) — "Drive events (play-by-play) for live games," split out
+// from the original "fuller live gamecast view" item once the box
+// score/top-performers half shipped (2026-09-17). That item's whole
+// blocker was "no confirmed data source exists"; resolved live
+// 2026-09-20 (a real Sunday, CIN@HOU 2nd quarter): the SAME /matches/{id}
+// endpoint sync_injury_reports already calls carries a real `events`
+// array — one entry per drive/possession, each with a nested
+// `playDetails` array giving every individual play. Full vendor-shape
+// writeup and design rationale in db/migrations/014_drive_events.sql.
+//
+// Reuses getLiveGames() (same game_datetime -> +4h window every other
+// live job uses) and findHighlightlyMatch()'s cache — same structure as
+// syncLiveStats() above, just a different Highlightly endpoint
+// (/matches/{id}, not /box-score/{id}) and a wholesale replace instead
+// of an upsert, since the vendor sends the FULL drive list every poll,
+// not a delta.
+//
+// CONFIRMED live 2026-09-20: fetchHighlightly('/matches/{id}') returns
+// an ARRAY of one match object (Array.isArray === true, length 1), NOT a
+// bare object — unwrapped below via `Array.isArray(detail) ? detail[0]
+// : detail`. See db/migrations/014_drive_events.sql for why this matters
+// beyond this job: sync_injury_reports (above) reads `detail.injuries`
+// with no such unwrapping, which is always undefined on an array.
+//
+// Interval: same cadence and cost reasoning as LIVE_STATS_INTERVAL_MINUTES
+// above (13 games x (240min / 5min) = 48 ticks/game x 13 ~= 624 calls in
+// the early window, ~8% of the 7,500/day Pro-tier ceiling) — a separate
+// call from sync_live_stats/sync_injury_reports, not a shared fetch, same
+// "one job = one clear job" convention this file follows throughout.
+// ---------------------------------------------------------------------
+
+const DRIVE_EVENTS_INTERVAL_MINUTES = 5;
+
+async function syncDriveEvents() {
+  if (!process.env.HIGHLIGHTLY_API_KEY) {
+    console.warn('[job:sync_drive_events] HIGHLIGHTLY_API_KEY not set — skipping (see .env.example)');
+    return { recordsProcessed: 0 };
+  }
+  if (highlightlyOnCooldown()) {
+    console.warn(`[job:sync_drive_events] Highlightly on cooldown until ${new Date(highlightlyCooldownUntil).toISOString()} (recent 429s) — skipping this tick`);
+    return { recordsProcessed: 0 };
+  }
+
+  const games = await getLiveGames();
+  if (!games.length) return { recordsProcessed: 0 };
+
+  const { abbrByTeamId } = await loadTeamNameMap();
+  let processed = 0;
+
+  for (const game of games) {
+    const matchId = await findHighlightlyMatch(game, abbrByTeamId);
+    if (!matchId) continue;
+
+    let detail;
+    try {
+      detail = await fetchHighlightly(`/matches/${matchId}`);
+    } catch (err) {
+      console.warn(`[job:sync_drive_events] /matches/${matchId} fetch failed for game ${game.game_id} (${err.message})`);
+      continue;
+    }
+    // See this job's header comment — this endpoint returns an ARRAY of
+    // one match object, not a bare object.
+    const match = Array.isArray(detail) ? detail[0] : detail;
+    const events = match?.events;
+    if (!Array.isArray(events) || events.length === 0) continue;
+
+    const rows = [];
+    events.forEach((ev, index) => {
+      const blockAbbr = ev.team?.abbreviation;
+      const teamId =
+        blockAbbr === toHighlightlyAbbr(abbrByTeamId[game.home_team_id]) ? game.home_team_id :
+        blockAbbr === toHighlightlyAbbr(abbrByTeamId[game.away_team_id]) ? game.away_team_id :
+        null;
+      if (!teamId) {
+        console.warn(`[job:sync_drive_events] drive team "${blockAbbr}" didn't match either side of game ${game.game_id} — skipping this drive`);
+        return;
+      }
+      rows.push([
+        game.game_id, teamId, index + 1,
+        ev.start?.period ?? null, ev.start?.clock ?? null, ev.start?.yardLine ?? null,
+        ev.end?.period ?? null, ev.end?.clock ?? null, ev.end?.yardLine ?? null,
+        ev.result ?? null, ev.description ?? null, !!ev.isScoringPlay,
+        JSON.stringify(ev.playDetails ?? []),
+      ]);
+    });
+    if (!rows.length) continue;
+
+    // Vendor sends the FULL drive list every poll, not a delta — replace
+    // this game's drives wholesale rather than trying to diff/upsert.
+    await pool.query('DELETE FROM game_drives WHERE game_id = $1', [game.game_id]);
+    for (const r of rows) {
+      await pool.query(
+        `INSERT INTO game_drives
+           (game_id, team_id, drive_sequence, start_period, start_clock, start_yard_line,
+            end_period, end_clock, end_yard_line, result, description, is_scoring_play, play_details)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        r
+      );
+      processed++;
+    }
+  }
+
+  console.log(`[job:sync_drive_events] ${processed} drive row(s) synced across ${games.length} live game(s)`);
+  return { recordsProcessed: processed };
+}
+
+// ---------------------------------------------------------------------
 // Job body — sync_live_scores, REAL. Added 2026-09-14 for the
 // "refresh cadence lags same-day results" backlog item (docs/part2-
 // roadmap.md), scoped deliberately to ONLY the scoreboard (games.status/
@@ -2596,6 +2704,11 @@ const JOBS = {
     source: 'live_stats_vendor',
     schedule: { type: 'game-window', intervalMinutes: LIVE_SCORE_INTERVAL_MINUTES },
     run: syncLiveScores,
+  },
+  sync_drive_events: {
+    source: 'live_stats_vendor',
+    schedule: { type: 'game-window', intervalMinutes: DRIVE_EVENTS_INTERVAL_MINUTES },
+    run: syncDriveEvents,
   },
   sync_odds: {
     source: 'the-odds-api',
