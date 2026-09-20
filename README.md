@@ -126,13 +126,6 @@ from the README.*
   decided against for this app — that kind of predictive modeling is
   left to external tooling built on top of the API, not the core
   pipeline. See `docs/part2-roadmap.md`'s Backlog item 8.
-- **`sync_injury_reports` likely never actually records injuries** —
-  found 2026-09-20 while confirming drive events (above):
-  `fetchHighlightly('/matches/{id}')` returns an array-wrapped match
-  object, and this job reads `detail.injuries` with no unwrapping, which
-  is always `undefined` on an array. Not fixed yet — a one-line fix, but
-  a decision for whoever's asked first. See `docs/part2-roadmap.md`'s
-  Backlog item 3.
 - **No iOS app yet.** Last in the ordered backlog (`docs/part2-roadmap.md`)
   on purpose — the same `backend-api` surface a browser client calls
   (`/query`, `/props/players`, `/odds`, `/edge`, `/rankings`,

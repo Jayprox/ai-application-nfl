@@ -646,24 +646,25 @@ drafting the iOS app is the last thing in this list, not the first.
    confirmed live against 8 real concurrent games — 84 drives inserted,
    zero errors); new `GET /games/:gameId/drives` route; new Drive Feed
    section on `GameDetailPage.jsx`, most-recent-drive-first.
-3. **`sync_injury_reports` likely never actually records injuries —
-   found 2026-09-20, not fixed.** Discovered while confirming item 2
-   above, in a completely different job: `fetchHighlightly('/matches/
-   {id}')` actually returns an ARRAY of one match object, not a bare
-   object (confirmed live — `Array.isArray === true`, length 1).
-   `sync_injury_reports` (worker/ingestion-worker.js) reads
+3. **`sync_injury_reports` never actually recorded injuries — found and
+   fixed 2026-09-20.** Discovered while confirming item 2 above, in a
+   completely different job: `fetchHighlightly('/matches/{id}')`
+   actually returns an ARRAY of one match object, not a bare object
+   (confirmed live — `Array.isArray === true`, length 1).
+   `sync_injury_reports` (worker/ingestion-worker.js) read
    `detail.injuries` directly with no unwrapping, which is always
-   `undefined` on an array, so `detail.injuries || []` has silently
-   iterated an empty list on every single run since that job shipped —
-   meaning it has likely never recorded a real injury row this whole
-   time. Not fixed as part of item 2 above (out of scope, a decision for
-   whoever's asked, and touching a different already-shipped job without
-   being asked isn't this app's convention) — a one-line fix
-   (`detail.injuries` → `detail[0]?.injuries`, same unwrap
-   `syncDriveEvents()` now does) once someone signs off on it. Worth
-   checking the real `injury_reports` row count/dates first to confirm
-   the theory before fixing — this is reasoned from the code, not yet
-   directly confirmed against an empty table.
+   `undefined` on an array, so `detail.injuries || []` silently iterated
+   an empty list on every single run since that job shipped. **CONFIRMED
+   against real production data before fixing** (per this item's own
+   original "check row count first" caveat): `injury_reports` had 0
+   rows, period, in production — this genuinely never recorded a single
+   injury. Fixed with the same array-unwrap `syncDriveEvents()` already
+   does (`const match = Array.isArray(detail) ? detail[0] : detail`),
+   and verified live against the fix before shipping: the corrected path
+   surfaces real data (10 real injury entries across a live CLE@TB
+   match, e.g. "Jacob Parrish, Cornerback, Out"). Going forward only —
+   this doesn't backfill whatever injury context was missed on any
+   already-final game while the bug was live.
 4. **Game props: team totals — shipped 2026-09-18.** The deliberate
    follow-up noted in Player Props' own original commit message
    (`9dd9ef5`, 2026-09-17). Extends `game_odds` with a `team_totals`

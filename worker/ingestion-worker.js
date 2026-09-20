@@ -1301,7 +1301,17 @@ async function syncInjuryReports() {
       continue;
     }
 
-    for (const teamBlock of detail.injuries || []) {
+    // FIXED 2026-09-20 (Part 2 backlog item 3, docs/part2-roadmap.md):
+    // this endpoint returns an ARRAY of one match object, not a bare
+    // object (confirmed live while building sync_drive_events below,
+    // same unwrap that job already does) — `detail.injuries` with no
+    // unwrapping was always undefined on an array, so this loop has
+    // silently iterated an empty list on every run since this job
+    // shipped. Not yet confirmed how many real injury rows this cost
+    // historically (see that backlog item for the "check row count
+    // first" caveat) — this only fixes it going forward.
+    const match = Array.isArray(detail) ? detail[0] : detail;
+    for (const teamBlock of match?.injuries || []) {
       const blockAbbr = teamBlock.team?.abbreviation;
       const teamId =
         blockAbbr === toHighlightlyAbbr(abbrByTeamId[game.home_team_id]) ? game.home_team_id :
