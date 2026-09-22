@@ -38,11 +38,6 @@
  * (real production data confirmed DK has full coverage across all 5
  * launch markets, so this isn't trading coverage for the fix).
  *
- * Recent-form context reuses backend/lib/stats-query.js's queryPlayer()
- * (via runStatsQuery, scope 'last5') rather than re-deriving an average
- * here — same "one source of truth" principle the rest of this app
- * follows for stats.
- *
  * Final-game grading (2026-09-18, "show if the props hit" request) —
  * same idea frontend/src/components/OddsBadge.jsx already applies to
  * game-level odds ("lock the values when the game starts... and then
@@ -57,12 +52,47 @@
  * label) — kept here rather than in picks_log/grade_picks because a
  * prop board entry isn't a user's pick, it's the market's own line; there
  * is nothing to grade "correct/incorrect" against.
+ *
+ * PERFORMANCE FIX 2026-09-21 ("Props page takes several seconds on web
+ * and iOS" report). attachContext() used to reuse stats-query.js's
+ * queryPlayer() (via runStatsQuery, same "one source of truth" principle
+ * /query and the chat agent's get_player_stats tool follow) once per
+ * (player, market) DraftKings row, awaited serially in a plain for-loop.
+ * CONFIRMED against real production data before assuming this was the
+ * cause, not just theorized: this week's slate (2026 season, week 2, 15
+ * games) has 920 distinct (player, market) DraftKings rows. Each one
+ * paid for up to 3 sequential round trips inside runStatsQuery/
+ * queryPlayer — a `SELECT position_group FROM players` lookup, the
+ * actual last5/game_log stat query, and a getFreshness
+ * ('sync_historical_stats') call whose result this route never even
+ * read (attachContext only used result.data/result.sampleSize) — plus a
+ * 4th query per row once a game goes final. That's ~2,600-3,600
+ * sequential, awaited Postgres round trips for one page load. Existing
+ * indexes (idx_player_offense_player_id, the (game_id, player_id)
+ * primary key) were confirmed fine — this was a round-trip-count
+ * problem, not a slow-query problem. Both web (PropsPage.jsx) and the
+ * iOS app's PropsView call this exact same endpoint, so the fix here
+ * covers both clients without any change on either.
+ *
+ * Fixed by replacing the per-row reuse of queryPlayer() with two
+ * purpose-built BATCHED queries covering the whole slate at once
+ * (batchRecentForm()/batchFinalValues() below), plus carrying
+ * position_group on this route's own existing players JOIN instead of a
+ * separate per-player lookup. This is a deliberate, scoped exception to
+ * the "one source of truth" reuse convention — stats-query.js's
+ * queryPlayer() stays the real source of truth for the single-player
+ * /query route and the chat agent's tool, which don't have this route's
+ * "same handful of games' worth of players, computed hundreds of times
+ * over in one request" shape; duplicating (not modifying) the last5/
+ * game_log logic here, batched, is the honest tradeoff. Net effect: 2
+ * queries total for context-attachment, regardless of slate size,
+ * instead of up to ~3,600 — the main players JOIN already covers
+ * position_group and the per-row position lookup that used to require.
  * =========================================================================
  */
 
 const express = require('express');
 const { query } = require('../db');
-const { runStatsQuery } = require('../lib/stats-query');
 
 const router = express.Router();
 
@@ -131,13 +161,102 @@ function leanFromTdRate(tdRate, gamesPlayed) {
   return { lean: 'toss_up', reasoning: `Scored in ${pct}% of last ${gamesPlayed} games — no clear signal.`, edgePct };
 }
 
+// Batched replacement for calling stats-query.js's queryPlayer() with
+// scope 'last5' (yardage/receptions markets) and scope 'game_log'
+// (anytime_td's TD-rate) once per player. One CTE, one pass over
+// player_offense_game_stats for every offense player who has at least
+// one DraftKings prop on this slate, instead of a separate query per
+// player per market — a player with both a rush-yards prop and an
+// anytime_td prop previously paid for two separate queries computing
+// last5/game_log context off the exact same underlying rows.
+//
+// Only offense players are queried — every Props market is an
+// offensive stat, so a non-offense player_id (would only happen from a
+// data-quality issue; not expected in practice) just gets no
+// recent-form context, same graceful-null result queryPlayer()'s own
+// table/column mismatch already produced for that case before this fix.
+//
+// Returns Map<player_id, { gamesPlayed, avg: {passing_yards,
+// rushing_yards, receiving_yards, receptions}, tdGames }>. tdGames is
+// "scored in this many of the last 5" — leanFromTdRate's caller divides
+// by gamesPlayed itself, same math the original per-player game_log
+// path did in JS.
+async function batchRecentForm(playerIds, season) {
+  const out = new Map();
+  if (playerIds.length === 0) return out;
+
+  const { rows } = await query(
+    `WITH recent AS (
+       SELECT stats.player_id, stats.passing_yards, stats.rushing_yards,
+              stats.receiving_yards, stats.receptions,
+              stats.rushing_tds, stats.receiving_tds, stats.passing_tds,
+              ROW_NUMBER() OVER (PARTITION BY stats.player_id ORDER BY g.game_datetime DESC) AS rn
+       FROM player_offense_game_stats stats
+       JOIN games g ON g.game_id = stats.game_id
+       WHERE stats.player_id = ANY($1::uuid[]) AND g.season = $2
+     )
+     SELECT player_id,
+            COUNT(*)::int AS games_played,
+            AVG(passing_yards)::float8 AS passing_yards,
+            AVG(rushing_yards)::float8 AS rushing_yards,
+            AVG(receiving_yards)::float8 AS receiving_yards,
+            AVG(receptions)::float8 AS receptions,
+            COUNT(*) FILTER (
+              WHERE COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0) + COALESCE(passing_tds, 0) > 0
+            )::int AS td_games
+     FROM recent
+     WHERE rn <= 5
+     GROUP BY player_id`,
+    [playerIds, season]
+  );
+
+  for (const r of rows) {
+    out.set(r.player_id, {
+      gamesPlayed: r.games_played,
+      avg: {
+        passing_yards: r.passing_yards,
+        rushing_yards: r.rushing_yards,
+        receiving_yards: r.receiving_yards,
+        receptions: r.receptions,
+      },
+      tdGames: r.td_games,
+    });
+  }
+  return out;
+}
+
+// Batched replacement for the per-row "is this game final, and if so
+// what did this player actually do" lookup — one query covering every
+// (game_id, player_id) pair that needs grading instead of one query per
+// prop row (a player with two final-game props previously paid for this
+// same row twice). Returns Map<"game_id|player_id", raw stat row> with
+// columns left un-COALESCEd, same as the raw table — callers COALESCE
+// to 0 themselves per-market below, same "a NULL column on a row that
+// exists means a real 0, not unknown" reasoning the 2026-09-18 grading
+// fix established (see this file's other header comment).
+async function batchFinalValues(gameIds, playerIds) {
+  const out = new Map();
+  if (gameIds.length === 0 || playerIds.length === 0) return out;
+
+  const { rows } = await query(
+    `SELECT game_id, player_id, passing_yards, rushing_yards, receiving_yards,
+            receptions, rushing_tds, receiving_tds, passing_tds
+     FROM player_offense_game_stats
+     WHERE game_id = ANY($1::varchar[]) AND player_id = ANY($2::uuid[])`,
+    [gameIds, playerIds]
+  );
+
+  for (const r of rows) out.set(`${r.game_id}|${r.player_id}`, r);
+  return out;
+}
+
 // Picks DraftKings's row per (player, market) — see header comment for
 // why a single book rather than a preference list — then attaches
-// recent-form context + a deterministic lean. Runs the stats-query
-// lookup once per (player, market) pair actually present, not once per
-// raw odds row. A player DraftKings hasn't posted this market for yet
-// just doesn't appear, same graceful-omission convention OddsBadge.jsx
-// uses ("renders nothing until DraftKings has actually posted a line").
+// recent-form context + a deterministic lean, using the two batched
+// queries above instead of a per-row lookup. A player DraftKings hasn't
+// posted this market for yet just doesn't appear, same graceful-
+// omission convention OddsBadge.jsx uses ("renders nothing until
+// DraftKings has actually posted a line").
 async function attachContext(rows, season) {
   const byPlayerMarket = new Map();
   for (const r of rows) {
@@ -145,10 +264,29 @@ async function attachContext(rows, season) {
     const key = `${r.player_id}|${r.market}`;
     byPlayerMarket.set(key, r);
   }
-
   const picked = [...byPlayerMarket.values()];
-  const out = [];
 
+  // Gather every batch's real inputs up front — which offense players
+  // need recent-form context, and which (game_id, player_id) pairs need
+  // a final grade — before issuing either query, instead of discovering
+  // them row-by-row the way the old per-row loop did.
+  const recentFormPlayerIds = new Set();
+  const finalGameIds = new Set();
+  const finalPlayerIds = new Set();
+  for (const r of picked) {
+    if (r.position_group === 'offense') recentFormPlayerIds.add(r.player_id);
+    if (r.game_status === 'final') {
+      finalGameIds.add(r.game_id);
+      finalPlayerIds.add(r.player_id);
+    }
+  }
+
+  const [recentForm, finalValues] = await Promise.all([
+    batchRecentForm([...recentFormPlayerIds], season),
+    batchFinalValues([...finalGameIds], [...finalPlayerIds]),
+  ]);
+
+  const out = [];
   for (const r of picked) {
     const base = {
       game_id: r.game_id,
@@ -164,62 +302,33 @@ async function attachContext(rows, season) {
       player: { player_id: r.player_id, full_name: r.full_name, position: r.position, team_id: r.team_id },
     };
 
-    // Only fetch a real per-game value once the game is actually final —
-    // same gate OddsBadge.jsx uses ("status === 'final'") before grading
-    // anything. Distinct from the recent_avg/td_rate context below (which
-    // always covers the player's last 5 PAST games, an over-time trend),
-    // this is the ONE specific game this prop is for. No ROW AT ALL (DNP,
-    // inactive, unresolved vendor name) leaves final_value null — same
-    // "can't grade, don't guess" stance grade_picks' own void case takes.
-    //
-    // FIXED 2026-09-18 ("TOSS-UP badges never finalize" report): a row
-    // existing is not the same as every column on it being non-null —
-    // Highlightly's box score OMITS an entire stat group (Passing/
-    // Rushing/Receiving/General) for a player rather than reporting an
-    // explicit 0, whenever that player recorded nothing in it. CONFIRMED
-    // directly against the real DET@BUF 2026-09-18 box score: TE Brock
-    // Wright's entry carries only a General group (0 fumbles, 1 recovered
-    // fumble) — no Receiving group at all, because he had zero targets —
-    // so his player_offense_game_stats row exists (the General stat
-    // created it) but targets/receptions/receiving_yards all land NULL,
-    // not because we don't know his receiving line, but because it's
-    // genuinely 0. The old code treated that column-level NULL the same
-    // as "no row" and left final_value null, so the card fell back to the
-    // pregame TOSS-UP LeanBadge forever — indistinguishable from a game
-    // that hadn't started. Now COALESCEd to 0 here, same as the
-    // anytime_td branch already did for exactly this reason (its rushing_
-    // tds/receiving_tds/passing_tds COALESCE was already correct — this
-    // just brings the other 4 markets in line with it). A genuinely
-    // unresolved player (no row at all — no stat category matched him in
-    // this game) still leaves final_value null and still renders as a
-    // real void state, not a false Under.
     let finalValue = null;
     if (r.game_status === 'final') {
-      if (r.market === 'player_anytime_td') {
-        const { rows: finalRows } = await query(
-          `SELECT (COALESCE(rushing_tds, 0) + COALESCE(receiving_tds, 0) + COALESCE(passing_tds, 0)) AS value
-           FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
-          [r.game_id, r.player_id]
-        );
-        finalValue = finalRows.length ? (Number(finalRows[0].value) > 0 ? 1 : 0) : null;
-      } else if (MARKET_STAT_COLUMN[r.market]) {
-        const { rows: finalRows } = await query(
-          `SELECT COALESCE(${MARKET_STAT_COLUMN[r.market]}, 0) AS value FROM player_offense_game_stats WHERE game_id = $1 AND player_id = $2`,
-          [r.game_id, r.player_id]
-        );
-        finalValue = finalRows.length ? Number(finalRows[0].value) : null;
+      const statRow = finalValues.get(`${r.game_id}|${r.player_id}`);
+      if (statRow) {
+        if (r.market === 'player_anytime_td') {
+          const tds =
+            Number(statRow.rushing_tds ?? 0) + Number(statRow.receiving_tds ?? 0) + Number(statRow.passing_tds ?? 0);
+          finalValue = tds > 0 ? 1 : 0;
+        } else if (MARKET_STAT_COLUMN[r.market]) {
+          finalValue = Number(statRow[MARKET_STAT_COLUMN[r.market]] ?? 0);
+        }
       }
     }
     base.final_value = finalValue;
 
     const statColumn = MARKET_STAT_COLUMN[r.market];
+    const form = recentForm.get(r.player_id);
+
     if (statColumn) {
-      const result = await runStatsQuery({ entity_type: 'player', entity_id: r.player_id, scope: 'last5', season });
-      const recentAvg = result.data ? Number(result.data[statColumn]) : null;
-      const { lean, reasoning, edgePct } = leanFromAverage(Number.isFinite(recentAvg) ? recentAvg : null, r.line != null ? Number(r.line) : null);
+      const recentAvg = form ? form.avg[statColumn] : null;
+      const { lean, reasoning, edgePct } = leanFromAverage(
+        Number.isFinite(recentAvg) ? recentAvg : null,
+        r.line != null ? Number(r.line) : null
+      );
       out.push({
         ...base,
-        context: { recent_avg: Number.isFinite(recentAvg) ? recentAvg : null, games_played: result.sampleSize ?? 0 },
+        context: { recent_avg: Number.isFinite(recentAvg) ? recentAvg : null, games_played: form?.gamesPlayed ?? 0 },
         lean,
         reasoning,
         edge_pct: edgePct,
@@ -228,16 +337,12 @@ async function attachContext(rows, season) {
       // player_anytime_td: no single stat column or line to compare —
       // lean off how often the player scored ANY touchdown (rushing +
       // receiving + passing, any of them) in their last 5 games instead.
-      const result = await runStatsQuery({ entity_type: 'player', entity_id: r.player_id, scope: 'game_log', season });
-      const games = (result.data || []).slice(0, 5);
-      const tdGames = games.filter(
-        (g) => Number(g.rushing_tds || 0) + Number(g.receiving_tds || 0) + Number(g.passing_tds || 0) > 0
-      ).length;
-      const tdRate = games.length > 0 ? tdGames / games.length : null;
-      const { lean, reasoning, edgePct } = leanFromTdRate(tdRate, games.length);
+      const gamesPlayed = form?.gamesPlayed ?? 0;
+      const tdRate = gamesPlayed > 0 ? form.tdGames / gamesPlayed : null;
+      const { lean, reasoning, edgePct } = leanFromTdRate(tdRate, gamesPlayed);
       out.push({
         ...base,
-        context: { recent_avg: null, games_played: games.length, td_rate: tdRate },
+        context: { recent_avg: null, games_played: gamesPlayed, td_rate: tdRate },
         lean,
         reasoning,
         edge_pct: edgePct,
@@ -268,7 +373,7 @@ router.get('/players', async (req, res) => {
 
     const { rows } = await query(
       `SELECT DISTINCT ON (ppo.game_id, ppo.player_id, ppo.bookmaker, ppo.market)
-              ppo.*, p.full_name, p.position, p.current_team_id AS team_id, g.status AS game_status
+              ppo.*, p.full_name, p.position, p.position_group, p.current_team_id AS team_id, g.status AS game_status
        FROM player_prop_odds ppo
        JOIN games g ON g.game_id = ppo.game_id
        JOIN players p ON p.player_id = ppo.player_id
