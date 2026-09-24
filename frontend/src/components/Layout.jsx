@@ -112,6 +112,9 @@ export default function Layout() {
             <NavGroup label="Research" items={RESEARCH_ITEMS} />
             <NavGroup label="Agents" items={AGENTS_ITEMS} />
             <NavGroup label="Record" items={RECORD_ITEMS} />
+            <NavLink to="/guide" className={navLinkClass}>
+              Guide
+            </NavLink>
             <button
               type="button"
               onClick={handleLogout}
@@ -152,6 +155,7 @@ export default function Layout() {
             <MobileNavSection title="Research" items={RESEARCH_ITEMS} onNavigate={() => setMobileOpen(false)} />
             <MobileNavSection title="Agents" items={AGENTS_ITEMS} onNavigate={() => setMobileOpen(false)} />
             <MobileNavSection title="Record" items={RECORD_ITEMS} onNavigate={() => setMobileOpen(false)} />
+            <MobileNavSection title={null} items={[{ to: '/guide', label: 'Guide' }]} onNavigate={() => setMobileOpen(false)} />
             <div className="pt-2 mt-2 border-t border-line">
               <button
                 type="button"
