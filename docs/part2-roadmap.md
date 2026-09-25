@@ -785,6 +785,77 @@ drafting the iOS app is the last thing in this list, not the first.
    (`chalk-that-nfl-ios-brief.md`) — no longer tracked as an open item
    here.
 
+11. **User-selectable Props -> personal Portfolio picks, Hit/Miss/Push
+   grading, and an all-users Leaderboard — not started.** Requested
+   2026-09-25: let a signed-in user pick a specific line off the Props
+   board and add it to their own portfolio (distinct from the
+   deterministic `portfolio_agent_v1` slate), see their own record and
+   pick history once games finalize as a Hit, Miss, or Push, and see a
+   leaderboard ranking every registered user by wins/win-percentage —
+   visible to everyone, not just each user's own picks.
+
+   **What already exists and can be reused directly:**
+   - Hit/Miss/Push grading is already generic, not something to build.
+     `picks_log.status` (`pending`/`correct`/`incorrect`/`push`/`void`,
+     `004_picks_log.sql`) and `grade_picks`
+     (`worker/ingestion-worker.js`) already grade a `player_stat` pick's
+     `predicted_direction`/`predicted_line` against the real final stat
+     value, landing on `push` on an exact-line match — this is already
+     Hit ("correct") / Miss ("incorrect") / Push. A prop-sourced pick
+     (market -> stat_category, e.g. `player_rush_yds` ->
+     `rushing_yards`, already mapped in `props.js`'s
+     `MARKET_STAT_COLUMN`) fits this exact shape.
+   - `picks_log`'s `player_stat` shape (`player_id`, `stat_category`,
+     `predicted_direction`, `predicted_line`) already matches what a
+     Props row is picked against — a user choosing Over/Under on a
+     specific DraftKings line just needs to log a row carrying that
+     exact line and direction.
+
+   **What's genuinely new:**
+   - **No user identity on a pick today.** `picks_log` has no
+     `user_id`/FK to `users` — every row is attributed to a free-text
+     `agent_name` (`portfolio_agent_v1`, etc.), not a person. Needs a
+     nullable `user_id UUID REFERENCES users(user_id)` column so a
+     user-authored pick and an agent-authored pick share one table/one
+     grading job but stay attributable separately.
+   - **No authenticated write path for a single arbitrary pick.** The
+     only existing authenticated write is `POST /portfolio/build`
+     (agent-driven, builds a whole slate at once). A user picking one
+     specific prop line needs its own authenticated endpoint (e.g.
+     `POST /portfolio/picks`) that logs one `picks_log` row under
+     `req.user`'s `user_id`, capturing the exact line/price the user saw
+     at pick time (since `player_prop_odds` is append-only and lines
+     move) rather than re-deriving it later from whatever the current
+     line happens to be.
+   - **Props board needs a pick affordance.** `PropsPage.jsx` (web) /
+     `PropsView` (iOS) currently only display lines — need a selectable
+     Over/Under control per row that calls the new endpoint, plus some
+     indicator that a line is already in the user's portfolio for that
+     game/market so they don't double-log it.
+   - **A "my portfolio" read view.** `PortfolioPage.jsx` today shows the
+     one agent's build tool plus its own logged record. A signed-in
+     user's own record/pick history is a different, user-scoped read
+     (`WHERE user_id = req.user.user_id`) — the same shape `GET /picks`
+     already supports by `agent_name`, extended to also filter by
+     `user_id`.
+   - **Leaderboard needs to rank users, not just agents.**
+     `GET /leaderboard` (`backend/routes/leaderboard.js`) currently
+     `GROUP BY agent_name` only. Extending to also `GROUP BY user_id`
+     (joined to `users.username` for display) is the same aggregation
+     shape already proven out — open question for whenever this is
+     built: one shared ranked list vs. separate agent/user sections
+     (agents are deterministic and always-on, users are opt-in, so
+     keeping them visually distinct is probably worth it even if the
+     underlying query is similar).
+   - iOS mirror: the same shape in `PortfolioView`/`LeaderboardView`
+     once the web API surface above exists — matches every other
+     feature in this app's "same API, both platforms" convention.
+
+   Not started. Unlike alt lines (#5 above), there's no open research
+   question blocking this — the grading and storage shape already exist
+   and are proven; it's additive schema (one column) plus new routes and
+   new UI, not a new data source or an unresolved design question.
+
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
 `users` table has 8 rows today, but 7 are seed/test accounts with no
