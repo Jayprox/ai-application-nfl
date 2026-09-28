@@ -17,6 +17,7 @@ import EdgePage from './pages/EdgePage';
 import PortfolioPage from './pages/PortfolioPage';
 import ChatPage from './pages/ChatPage';
 import GuidePage from './pages/GuidePage';
+import LeadersPage from './pages/LeadersPage';
 import NotFoundPage from './pages/NotFoundPage';
 
 // Route tree mirrors the 5-screen inventory from
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="guide" element={<GuidePage />} />
+          <Route path="leaders" element={<LeadersPage />} />
         </Route>
       </Route>
 

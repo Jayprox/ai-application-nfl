@@ -9,9 +9,18 @@
  * Body:
  *   entity_type: "player" | "team"
  *   entity_id:   player UUID, or numeric team_id
- *   scope:       "season" | "season_total" | "last5" | "career" | "game_log"
- *   season:      required for season/season_total/last5/game_log, ignored for career
+ *   scope:       "season" | "season_total" | "last5" | "career" | "game_log" | "leaderboard"
+ *   season:      required for season/season_total/last5/game_log/leaderboard, ignored for career
  *   splits:      optional { home_away, game_slot, weather_condition }
+ *
+ * scope: "leaderboard" (2026-09-28, League Leaderboard) is shaped
+ * differently -- no entity_type/entity_id, since it's not about one
+ * player/team. Its own params instead: stat (one of lib/stats-query.js's
+ * LEADERBOARD_STATS keys), game_type ("regular" | "postseason", default
+ * "regular"), per_game (bool, default false, ignored for rate stats),
+ * limit (1-50, default 10). Real season totals sorted and capped, no
+ * scoring model -- see lib/ranking.js's Rankings agent for the deliberately
+ * distinct model-based ranking feature this is NOT trying to be.
  *
  * Response:
  *   { data: {...per-game averages (season/last5) or career totals
@@ -61,12 +70,58 @@ const {
   VALID_SCOPES,
   VALID_GAME_SLOTS,
   VALID_WEATHER,
+  VALID_GAME_TYPES,
+  LEADERBOARD_STATS,
 } = require('../lib/stats-query');
 
 const router = express.Router();
 
 router.post('/', async (req, res) => {
   const { entity_type, entity_id, scope, season, splits } = req.body || {};
+
+  // scope: "leaderboard" is a different shape from every other scope --
+  // no entity_type/entity_id (it's not about one player/team), plus its
+  // own stat/game_type/per_game/limit params -- so it's validated and
+  // handled as its own branch rather than threading through the
+  // entity_type/entity_id checks below. Deliberately NOT added to
+  // VALID_SCOPES itself: that same constant is also the enum the chat
+  // orchestrator's get_player_stats tool exposes to the LLM (see
+  // lib/orchestrator.js), and that tool always requires a player_id --
+  // adding "leaderboard" there would offer the LLM a scope its own tool
+  // can't actually satisfy.
+  if (scope === 'leaderboard') {
+    const { stat, game_type: gameTypeRaw, per_game: perGame = false, limit } = req.body || {};
+    const gameType = gameTypeRaw ?? 'regular';
+
+    if (!stat || !LEADERBOARD_STATS[stat]) {
+      return res.status(400).json({ error: `stat is required and must be one of: ${Object.keys(LEADERBOARD_STATS).join(', ')}` });
+    }
+    if (!season || !/^\d{4}$/.test(String(season))) {
+      return res.status(400).json({ error: 'season must be a 4-digit year' });
+    }
+    if (!VALID_GAME_TYPES.includes(gameType)) {
+      return res.status(400).json({ error: `game_type must be one of: ${VALID_GAME_TYPES.join(', ')}` });
+    }
+    if (typeof perGame !== 'boolean') {
+      return res.status(400).json({ error: 'per_game must be a boolean' });
+    }
+    const resultLimit = limit === undefined ? 10 : Number(limit);
+    if (!Number.isInteger(resultLimit) || resultLimit < 1 || resultLimit > 50) {
+      return res.status(400).json({ error: 'limit must be an integer 1-50' });
+    }
+
+    try {
+      const result = await runStatsQuery({ scope, stat, season: Number(season), gameType, perGame, limit: resultLimit });
+      if (result.error) return res.status(result.status || 400).json({ error: result.error });
+      return res.json({
+        data: result.data,
+        meta: { sample_size: result.sampleSize, freshness: result.freshness, qualifier: result.qualifier, notes: result.notes },
+      });
+    } catch (err) {
+      console.error('[routes/query] leaderboard failed:', err);
+      return res.status(500).json({ error: 'internal error' });
+    }
+  }
 
   if (!['player', 'team'].includes(entity_type)) {
     return res.status(400).json({ error: 'entity_type must be "player" or "team"' });

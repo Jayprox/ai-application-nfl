@@ -27,6 +27,7 @@ const SECTIONS = [
   { id: 'research', label: 'Games, Teams, Players' },
   { id: 'game-detail', label: 'Inside a game' },
   { id: 'rankings', label: 'Rankings' },
+  { id: 'leaders', label: 'League Leaders' },
   { id: 'props', label: 'Props' },
   { id: 'edge', label: 'Edge' },
   { id: 'portfolio', label: 'Portfolio' },
@@ -120,6 +121,18 @@ export default function GuidePage() {
           built from real season data — recent form, matchup context, and a few other real signals blended
           together. It's a ranking, not a prediction: the score reflects how a player has actually been
           performing and who they're facing, not a projection of what they'll do next.
+        </p>
+      </GuideSection>
+
+      <GuideSection id="leaders" title="League Leaders">
+        <p>
+          The top 10 players in a stat — passing, rushing, or receiving — for a season, plain real numbers
+          with no scoring or model involved. This is what separates it from Rankings above: Rankings blends
+          several signals into a score, League Leaders just sorts and caps real season totals (or per-game
+          averages, via the toggle). Passer Rating and Yards Per Carry use the NFL's own official minimum
+          attempts before a player qualifies, so one big game early in the season can't top the list — the
+          page states exactly what that minimum is. Counting stats like yards and touchdowns have no
+          minimum, matching how the NFL's own leaderboards work.
         </p>
       </GuideSection>
 
