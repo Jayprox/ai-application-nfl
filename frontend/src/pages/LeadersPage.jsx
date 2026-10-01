@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryPost } from '../hooks/useQueryPost';
+import { useStatsQuery } from '../hooks/useStatsQuery';
 import { useCurrentWeek } from '../hooks/useCurrentWeek';
+import { GAME_SLOT_OPTIONS, WEATHER_OPTIONS } from '../constants/splits';
 import AsyncState from '../components/AsyncState';
 
 /**
@@ -14,14 +15,31 @@ import AsyncState from '../components/AsyncState';
  * Served by the shared query engine (POST /query, scope: "leaderboard",
  * backend/lib/stats-query.js's queryLeaderboard()) rather than a one-off
  * route, so the same numbers are reachable by web, iOS, and any future
- * agent tool. Uses useQueryPost instead of useApiFetch because /query
- * takes a JSON body, not a GET path -- see that hook's header for why.
+ * agent tool. Uses useStatsQuery -- the same POST-/query hook
+ * PlayerDetailPage already uses -- rather than a page-local hook; this
+ * page originally shipped with its own useQueryPost, which turned out to
+ * duplicate useStatsQuery exactly (same stale-key/out-of-order-response
+ * guards, just keyed off a pre-stringified body instead of the raw
+ * object). Migrated 2026-09-30 rather than carrying two copies of the
+ * same fetch logic forward into the week/splits work below.
  *
  * Same 6-season window PlayerDetailPage's own historical view uses
  * (AVAILABLE_SEASONS there) -- this table only has real data for
  * completed/in-progress seasons anyway, and reusing that list keeps the
  * "which seasons have real data" answer in one place conceptually even
  * though it's duplicated here (PlayerDetailPage doesn't export it).
+ *
+ * week + splits (2026-09-30 brainstorm: "single-week leaders" +
+ * "splits leaders") reuse the exact same week-input convention
+ * RankingsPage already uses (a plain 1-22 number input, blank = whole
+ * season) and the exact same splits UI PlayerDetailPage already uses
+ * (home/away + game slot + weather selects, GAME_SLOT_OPTIONS/
+ * WEATHER_OPTIONS from constants/splits.js, a hasActiveSplit/clearSplits
+ * pair, a "Clear" link shown only once a split is active) -- both
+ * patterns already existed elsewhere in this app; this page just reuses
+ * them rather than inventing a third filter UI. Per-game is hidden
+ * whenever week is set, same reasoning as hiding it for rate stats: a
+ * single real game has nothing to average.
  */
 const AVAILABLE_SEASONS = [2026, 2025, 2024, 2023, 2022, 2021];
 const DEFAULT_SEASON = AVAILABLE_SEASONS[0];
@@ -88,12 +106,23 @@ export default function LeadersPage() {
   const [season, setSeason] = useState(DEFAULT_SEASON);
   const [gameType, setGameType] = useState('regular');
   const [perGame, setPerGame] = useState(false);
+  const [weekInput, setWeekInput] = useState('');
+  const [homeAway, setHomeAway] = useState('');
+  const [gameSlot, setGameSlot] = useState('');
+  const [weatherCondition, setWeatherCondition] = useState('');
 
   useCurrentWeek((current) => {
     setSeason(current.season);
   });
 
   const isRate = RATE_STATS.has(stat);
+  const week = weekInput.trim();
+  const hasActiveSplit = !!(homeAway || gameSlot || weatherCondition);
+  const clearSplits = () => {
+    setHomeAway('');
+    setGameSlot('');
+    setWeatherCondition('');
+  };
 
   const body = useMemo(
     () => ({
@@ -101,17 +130,25 @@ export default function LeadersPage() {
       stat,
       season,
       game_type: gameType,
-      per_game: isRate ? false : perGame,
+      per_game: isRate || week ? false : perGame,
       limit: 10,
+      ...(week && { week: Number(week) }),
+      ...(hasActiveSplit && {
+        splits: {
+          ...(homeAway && { home_away: homeAway }),
+          ...(gameSlot && { game_slot: gameSlot }),
+          ...(weatherCondition && { weather_condition: weatherCondition }),
+        },
+      }),
     }),
-    [stat, season, gameType, perGame, isRate]
+    [stat, season, gameType, perGame, isRate, week, hasActiveSplit, homeAway, gameSlot, weatherCondition]
   );
 
-  const { data, error, loading, refetch } = useQueryPost(body);
+  const { data, error, loading, refetch } = useStatsQuery(body);
   const rows = data?.data ?? [];
   const meta = data?.meta;
   const qualifier = meta?.qualifier;
-  const unit = isRate ? '' : perGame ? '/gm' : '';
+  const unit = isRate || week ? '' : perGame ? '/gm' : '';
 
   return (
     <div>
@@ -121,7 +158,7 @@ export default function LeadersPage() {
         from the model-based <Link to="/rankings" className="underline hover:no-underline">Rankings</Link> page.
       </p>
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <select value={stat} onChange={(e) => setStat(e.target.value)} className={selectClass} aria-label="Stat">
           {STAT_GROUPS.map((group) => (
             <optgroup key={group.label} label={group.label}>
@@ -147,7 +184,17 @@ export default function LeadersPage() {
             </option>
           ))}
         </select>
-        {!isRate && (
+        <input
+          type="number"
+          min="1"
+          max="22"
+          placeholder="All weeks"
+          aria-label="Week number (optional)"
+          value={weekInput}
+          onChange={(e) => setWeekInput(e.target.value)}
+          className="w-28 rounded-md border border-line px-3 py-2 text-sm bg-surface focus:outline-none focus:ring-2 focus:ring-accent"
+        />
+        {!isRate && !week && (
           <label className="flex items-center gap-2 text-sm text-ink-dim px-1">
             <input type="checkbox" checked={perGame} onChange={(e) => setPerGame(e.target.checked)} className="rounded border-line" />
             Per game
@@ -155,11 +202,45 @@ export default function LeadersPage() {
         )}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select value={homeAway} onChange={(e) => setHomeAway(e.target.value)} className={selectClass}>
+          <option value="">Home/Away: All</option>
+          <option value="home">Home only</option>
+          <option value="away">Away only</option>
+        </select>
+        <select value={gameSlot} onChange={(e) => setGameSlot(e.target.value)} className={selectClass}>
+          <option value="">Time Slot: All</option>
+          {GAME_SLOT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        <select
+          value={weatherCondition}
+          onChange={(e) => setWeatherCondition(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">Weather: All</option>
+          {WEATHER_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+        {hasActiveSplit && (
+          <button type="button" onClick={clearSplits} className="text-sm text-ink-dim underline hover:text-ink">
+            Clear
+          </button>
+        )}
+      </div>
+
       {loading || error ? (
         <AsyncState loading={loading} error={error} loadingLabel="Loading leaders…" onRetry={refetch} />
       ) : rows.length === 0 ? (
         <p className="text-sm text-ink-dim">
-          No qualifying players yet for {STAT_LABEL[stat].toLowerCase()} in the {season} {gameType === 'postseason' ? 'postseason' : 'regular season'}.
+          No qualifying players yet for {STAT_LABEL[stat].toLowerCase()} in the {season}
+          {week ? ` week ${week}` : ''} {gameType === 'postseason' ? 'postseason' : 'regular season'}.
         </p>
       ) : (
         <>

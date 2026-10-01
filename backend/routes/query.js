@@ -18,8 +18,12 @@
  * player/team. Its own params instead: stat (one of lib/stats-query.js's
  * LEADERBOARD_STATS keys), game_type ("regular" | "postseason", default
  * "regular"), per_game (bool, default false, ignored for rate stats),
- * limit (1-50, default 10). Real season totals sorted and capped, no
- * scoring model -- see lib/ranking.js's Rankings agent for the deliberately
+ * limit (1-50, default 10), week (1-22, optional -- 2026-09-30
+ * "single-week leaders": switches to one game per player and drops the
+ * qualifier), splits (optional { home_away, game_slot, weather_condition
+ * }, same shape/validation as the per-entity splits below -- 2026-09-30
+ * "splits leaders"). Real season totals sorted and capped, no scoring
+ * model -- see lib/ranking.js's Rankings agent for the deliberately
  * distinct model-based ranking feature this is NOT trying to be.
  *
  * Response:
@@ -90,7 +94,7 @@ router.post('/', async (req, res) => {
   // adding "leaderboard" there would offer the LLM a scope its own tool
   // can't actually satisfy.
   if (scope === 'leaderboard') {
-    const { stat, game_type: gameTypeRaw, per_game: perGame = false, limit } = req.body || {};
+    const { stat, game_type: gameTypeRaw, per_game: perGame = false, limit, week, splits: leaderboardSplits } = req.body || {};
     const gameType = gameTypeRaw ?? 'regular';
 
     if (!stat || !LEADERBOARD_STATS[stat]) {
@@ -109,9 +113,42 @@ router.post('/', async (req, res) => {
     if (!Number.isInteger(resultLimit) || resultLimit < 1 || resultLimit > 50) {
       return res.status(400).json({ error: 'limit must be an integer 1-50' });
     }
+    // week (2026-09-30, "single-week leaders" brainstorm item) -- optional;
+    // when present, queryLeaderboard() switches to a one-game-per-player
+    // view and skips the per-team-game qualifier entirely (see its own
+    // header comment for why a single game has nothing to qualify against).
+    let weekNum;
+    if (week !== undefined && week !== null && week !== '') {
+      weekNum = Number(week);
+      if (!Number.isInteger(weekNum) || weekNum < 1 || weekNum > 22) {
+        return res.status(400).json({ error: 'week must be an integer 1-22' });
+      }
+    }
+    // splits (2026-09-30, "splits leaders" brainstorm item) -- same shape
+    // and same validation as the per-entity splits below, just reused here
+    // since it's the identical { home_away, game_slot, weather_condition }
+    // contract against the identical games columns.
+    if (leaderboardSplits?.game_slot && !VALID_GAME_SLOTS.includes(leaderboardSplits.game_slot)) {
+      return res.status(400).json({ error: `splits.game_slot must be one of: ${VALID_GAME_SLOTS.join(', ')}` });
+    }
+    if (leaderboardSplits?.weather_condition && !VALID_WEATHER.includes(leaderboardSplits.weather_condition)) {
+      return res.status(400).json({ error: `splits.weather_condition must be one of: ${VALID_WEATHER.join(', ')}` });
+    }
+    if (leaderboardSplits?.home_away && !['home', 'away'].includes(leaderboardSplits.home_away)) {
+      return res.status(400).json({ error: 'splits.home_away must be "home" or "away"' });
+    }
 
     try {
-      const result = await runStatsQuery({ scope, stat, season: Number(season), gameType, perGame, limit: resultLimit });
+      const result = await runStatsQuery({
+        scope,
+        stat,
+        season: Number(season),
+        gameType,
+        perGame,
+        limit: resultLimit,
+        week: weekNum,
+        splits: leaderboardSplits,
+      });
       if (result.error) return res.status(result.status || 400).json({ error: result.error });
       return res.json({
         data: result.data,

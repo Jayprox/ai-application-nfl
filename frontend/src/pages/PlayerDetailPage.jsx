@@ -43,6 +43,105 @@ const SCOPES = [
 const AVAILABLE_SEASONS = [2026, 2025, 2024, 2023, 2022, 2021];
 const DEFAULT_SEASON = AVAILABLE_SEASONS[0];
 
+// Floor/ceiling card (2026-09-30 brainstorm round 1 item) -- same
+// offense-skill-position -> primary-stat mapping backend/lib/ranking.js's
+// OFFENSE_SKILL_POSITIONS already uses for Rankings (QB -> passing,
+// RB/FB/HB -> rushing, WR/TE -> receiving), reused here on the frontend
+// since this card is deliberately frontend-only: it reads the exact same
+// scope: 'game_log' rows this page's own Game Log tab already fetches
+// (just via its own independent useStatsQuery call, always the current
+// season, so it doesn't jump around as the user flips this page's own
+// scope/season tabs), no new backend endpoint needed.
+const PRIMARY_STAT_BY_POSITION = {
+  QB: { column: 'passing_yards', label: 'Passing Yards' },
+  RB: { column: 'rushing_yards', label: 'Rushing Yards' },
+  FB: { column: 'rushing_yards', label: 'Rushing Yards' },
+  HB: { column: 'rushing_yards', label: 'Rushing Yards' },
+  WR: { column: 'receiving_yards', label: 'Receiving Yards' },
+  TE: { column: 'receiving_yards', label: 'Receiving Yards' },
+};
+
+// Fewer than 2 real games this season isn't a "range" yet -- same
+// MIN_STREAK reasoning lib/trends.js already applies to a streak, applied
+// here to a floor/ceiling spread instead of hiding a misleadingly exact
+// single-game "range."
+const MIN_GAMES_FOR_CONSISTENCY = 2;
+
+// Coefficient of variation (sample stddev / mean) on the season's real
+// game-by-game values -- explicitly Chalk That's OWN rule, not an
+// official NFL stat, same "plain formula over real numbers, no model"
+// principle every other Part 1 feature already follows. Thresholds are a
+// simple, disclosed judgment call, not derived from a league-wide
+// distribution.
+function consistencyBadge(cv) {
+  if (cv == null) return null;
+  if (cv < 0.35) return { label: 'Consistent', className: 'text-positive bg-positive/12' };
+  if (cv <= 0.6) return { label: 'Moderate', className: 'text-caution bg-caution/12' };
+  return { label: 'Boom-or-bust', className: 'text-negative bg-negative/12' };
+}
+
+function FloorCeilingCard({ playerId, position }) {
+  const stat = PRIMARY_STAT_BY_POSITION[position];
+  const body = useMemo(
+    () => (stat ? { entity_type: 'player', entity_id: playerId, scope: 'game_log', season: DEFAULT_SEASON } : null),
+    [playerId, stat]
+  );
+  const { data, loading } = useStatsQuery(body);
+
+  if (!stat) return null; // not an offense skill position -- nothing to show
+
+  const rows = data?.data ?? [];
+  const values = rows.map((r) => Number(r[stat.column] ?? 0));
+  const n = values.length;
+
+  // Don't flash an empty/1-game card while the season's still loading or
+  // hasn't produced enough real games yet -- silently render nothing
+  // rather than a misleading partial read, same "graceful empty state"
+  // principle the rest of this app already follows for thin data.
+  if (loading || n < MIN_GAMES_FOR_CONSISTENCY) return null;
+
+  const floor = Math.min(...values);
+  const ceiling = Math.max(...values);
+  const avg = values.reduce((a, b) => a + b, 0) / n;
+  const variance = values.reduce((sum, v) => sum + (v - avg) ** 2, 0) / (n - 1);
+  const stddev = Math.sqrt(variance);
+  const cv = avg !== 0 ? stddev / avg : null;
+  const badge = consistencyBadge(cv);
+
+  return (
+    <div className="mb-6 rounded-md border border-line bg-surface p-4">
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-faint">
+          {stat.label} Floor / Ceiling — {DEFAULT_SEASON}
+        </h2>
+        {badge && (
+          <span className={`whitespace-nowrap rounded px-2 py-1 text-xs font-semibold ${badge.className}`}>
+            {badge.label}
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-4 text-center">
+        <div>
+          <div className="text-xs text-ink-faint uppercase tracking-wide">Floor</div>
+          <div className="text-lg font-semibold text-ink">{floor.toLocaleString()}</div>
+        </div>
+        <div>
+          <div className="text-xs text-ink-faint uppercase tracking-wide">Average</div>
+          <div className="text-lg font-semibold text-ink">{avg.toFixed(1)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-ink-faint uppercase tracking-wide">Ceiling</div>
+          <div className="text-lg font-semibold text-ink">{ceiling.toLocaleString()}</div>
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-ink-faint">
+        Real {n}-game range for {DEFAULT_SEASON}, not a projection — Chalk That's own rule (coefficient of
+        variation on real game logs), not an official NFL stat.
+      </p>
+    </div>
+  );
+}
+
 function formatSyncedAt(iso) {
   if (!iso) return 'not yet synced';
   const diffMinutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -155,6 +254,8 @@ export default function PlayerDetailPage() {
       </div>
 
       <PlayerInsights playerId={playerId} />
+
+      <FloorCeilingCard playerId={playerId} position={player.position} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="flex rounded-md border border-line bg-surface p-0.5">

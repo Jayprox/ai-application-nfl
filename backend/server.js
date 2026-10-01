@@ -24,6 +24,7 @@ const propsRoutes = require('./routes/props');
 const picksRoutes = require('./routes/picks');
 const matchupScoresRoutes = require('./routes/matchup-scores');
 const rankingsRoutes = require('./routes/rankings');
+const trendsRoutes = require('./routes/trends');
 const edgeRoutes = require('./routes/edge');
 const portfolioRoutes = require('./routes/portfolio');
 const leaderboardRoutes = require('./routes/leaderboard');
@@ -116,6 +117,10 @@ app.use('/matchup-scores', matchupScoresRoutes);
 // top-N view over matchup_scores for one stat category, no LLM call. See
 // routes/rankings.js and lib/ranking.js.
 app.use('/rankings', rankingsRoutes);
+// Trend/streak agent (2026-09-30 brainstorm) — current real streaks
+// against DraftKings' actual posted line for one prop market, no
+// invented threshold. See routes/trends.js and lib/trends.js.
+app.use('/trends', trendsRoutes);
 // Edge agent (Part 2 Phase 2, docs/part2-roadmap.md) — game-level v1:
 // compares each team's aggregate offensive-skill matchup-score lean
 // against which side game_odds' spreads/h2h actually favors. See

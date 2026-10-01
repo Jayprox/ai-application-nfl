@@ -18,12 +18,19 @@ const mobileNavLinkClass = ({ isActive }) =>
   }`;
 
 // Part 2 Phase 3 nav/IA cleanup (2026-09-15) — see NavGroup.jsx's own
-// header comment for why these 9 routes (everything but Board, which
+// header comment for why these routes (everything but Board, which
 // stays standalone as the app's front door) are grouped into 3 clusters
-// instead of 10 flat top-level links: Research (browsing raw
+// instead of flat top-level links: Research (browsing raw
 // schedule/team/player data), Agents (the deterministic/LLM agent
 // surfaces this app is actually built around), Record (accountability —
 // what got picked and how it graded).
+//
+// Trends (2026-09-30, brainstorm streaks/trends item) joined Agents,
+// not the standalone Leaders/Guide spot -- unlike Leaders (plain real
+// numbers, explicitly NOT a model, see LeadersPage.jsx's own header),
+// Trends is built as its own dedicated agent (lib/trends.js's header
+// literally calls it "the trend/streak agent"), same category Rankings
+// and Props are already in.
 const RESEARCH_ITEMS = [
   { to: '/games', label: 'Games' },
   { to: '/teams', label: 'Teams' },
@@ -32,6 +39,7 @@ const RESEARCH_ITEMS = [
 const AGENTS_ITEMS = [
   { to: '/rankings', label: 'Rankings' },
   { to: '/props', label: 'Props' },
+  { to: '/trends', label: 'Trends' },
   { to: '/edge', label: 'Edge' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/chat', label: 'Chat' },

@@ -29,6 +29,7 @@ const SECTIONS = [
   { id: 'rankings', label: 'Rankings' },
   { id: 'leaders', label: 'League Leaders' },
   { id: 'props', label: 'Props' },
+  { id: 'trends', label: 'Trends' },
   { id: 'edge', label: 'Edge' },
   { id: 'portfolio', label: 'Portfolio' },
   { id: 'record', label: 'Picks & Leaderboard' },
@@ -100,7 +101,12 @@ export default function GuidePage() {
           by division; open one to see its full roster grouped by position group.{' '}
           <strong className="text-ink">Players</strong> is search-and-filter across every player — open one
           to see their bio, current injury status (if any), and season stats across four views: Season Avg
-          (per-game average), Season Total, Last 5 games, Career, and a full Game Log.
+          (per-game average), Season Total, Last 5 games, Career, and a full Game Log — filterable by
+          home/away, time slot, and weather. Skill-position players (QB/RB/FB/HB/WR/TE) with at least 2
+          real games this season also get a Floor/Ceiling card: their real low, average, and high game this
+          season for their primary stat, plus a Consistent/Moderate/Boom-or-bust read — a plain
+          coefficient-of-variation formula over real game logs, clearly labeled as Chalk That's own read,
+          not an official NFL stat.
         </p>
       </GuideSection>
 
@@ -134,6 +140,12 @@ export default function GuidePage() {
           page states exactly what that minimum is. Counting stats like yards and touchdowns have no
           minimum, matching how the NFL's own leaderboards work.
         </p>
+        <p>
+          A week filter switches the whole page to a single-week view — one real game per player, so the
+          qualifier drops away entirely (there's nothing to scale it against). Home/away, time slot, and
+          weather filters narrow the same leaderboard to just games matching that split, same filters as a
+          player's own page.
+        </p>
       </GuideSection>
 
       <GuideSection id="props" title="Props">
@@ -144,6 +156,18 @@ export default function GuidePage() {
           says how far that real average sits from the market's own line; it's a descriptive comparison, not
           odds of winning. Once a game finishes, the card also shows what the player actually did that game,
           graded against the locked-in line.
+        </p>
+      </GuideSection>
+
+      <GuideSection id="trends" title="Trends">
+        <p>
+          Which players are currently on a real streak against the actual DraftKings line — pick a market
+          (passing/rushing/receiving yards, receptions, or anytime TD), a direction (Over/Under, or
+          Scored/No TD for anytime TD), and a season. A streak of "4" means the real stat cleared (or
+          missed) the same locked pregame line shown on Props four games in a row, most recent first — the
+          exact same hit/miss rule Props already uses, not a second definition of "hit." Real market lines
+          only, never a Chalk That-invented number. Streaks shorter than 2 games aren't shown — one game is
+          just last week's result, not a pattern yet.
         </p>
       </GuideSection>
 

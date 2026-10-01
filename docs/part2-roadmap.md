@@ -856,6 +856,63 @@ drafting the iOS app is the last thing in this list, not the first.
    and are proven; it's additive schema (one column) plus new routes and
    new UI, not a new data source or an unresolved design question.
 
+12. **Round 2 of the 2026-09-30 "algorithmic feature" brainstorm — not
+    started.** Phased behind Round 1 (single-week Leaders, splits
+    Leaders, Trends/streaks, floor/ceiling — all shipped this same
+    session) per the user's own explicit sequencing answer ("Phase it —
+    Leaders-engine extensions first"). All three items below stay
+    strictly numbers-based/algorithmic — no AI/ML — per that brainstorm's
+    standing constraint ("keeping it specifically numbers based.
+    Algorithmic. No AI calculations or methods").
+    - **Defense-vs-position grid.** How each real defense has actually
+      performed against each offensive position group this season (e.g.
+      "allows the 3rd-most receiving yards to WRs") — a plain aggregation
+      over `player_offense_game_stats` joined to the opposing team per
+      game, grouped by (defensive team, offensive position group),
+      ranked. No new data source needed; same shape `lib/ranking.js`'s
+      positional filtering already proves out, just aggregated the other
+      direction (defense's opponents, not the player's own team).
+    - **Red-zone / third-down stats.** Real situational splits (red-zone
+      touches/TDs, third-down conversion involvement) — the `game_drives`
+      table (`db/migrations/014_drive_events.sql`, shipped 2026-09-20,
+      one row per drive with `playDetails` JSONB) already carries
+      down/distance/yardLine per play, so this is a query over existing
+      data, not a new ingestion job. Needs research into exactly which
+      red-zone/third-down definitions to expose before building (e.g.
+      "red zone" = yardLine <= 20 to the end zone — needs the JSONB
+      shape confirmed against real drive rows first, not assumed).
+    - **Real ATS (against-the-spread) record.** A team's actual
+      cover/no-cover record this season against the real closing spread
+      — `game_odds` already stores spreads (per `OddsBadge.jsx`'s own
+      `gradeSpread()` logic, which already computes a single game's
+      cover outcome); this item is extending that existing per-game
+      grade into a season-long W-L-P aggregate per team, same
+      "deterministic grade over real stored numbers" pattern the rest of
+      this app already follows, not a new calculation concept.
+13. **Round 3 of the 2026-09-30 "algorithmic feature" brainstorm — not
+    started.** Also numbers-based/algorithmic, same standing constraint
+    as item 12.
+    - **Compare tool.** Put 2+ real players side by side across any
+      stat/season/split the existing `/query` engine already answers —
+      a frontend-only composition of `useStatsQuery` calls the app
+      already has (one call per selected player), no new backend route,
+      similar in spirit to how `GameDetailPage.jsx` already composes
+      several existing reads into one screen.
+    - **Season-over-season trend chart.** A player's real per-season
+      averages/totals across `AVAILABLE_SEASONS` plotted as a simple
+      line/bar chart — again a frontend composition over `/query`'s
+      existing `season`/`season_total`/`career` scopes (one call per
+      season, or a small new `season_series` scope on the backend if
+      fetching 6 seasons individually turns out to be too chatty once
+      actually tried), no model, just real numbers over time.
+    - **Weekly recap widget (Board page).** "Biggest real performances
+      this week" — per the brainstorm answer that settled this ("A
+      widget on the existing Board page"), a small card on
+      `BoardPage.jsx` surfacing the week's top few single-game stat
+      lines, likely reusing `queryLeaderboard()`'s new `week` param
+      (shipped this session, see League Leaders above) under the hood
+      rather than a new query shape.
+
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
 `users` table has 8 rows today, but 7 are seed/test accounts with no

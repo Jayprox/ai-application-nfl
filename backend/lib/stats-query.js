@@ -173,11 +173,46 @@ async function teamGamesPlayed(season, gameType) {
   return row?.team_games || 0;
 }
 
-async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = false, limit = 10 }) {
+async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = false, limit = 10, week = null, splits = null }) {
   const def = LEADERBOARD_STATS[stat];
   if (!def) return { error: `stat must be one of: ${Object.keys(LEADERBOARD_STATS).join(', ')}`, status: 400 };
 
-  const teamGames = await teamGamesPlayed(season, gameType);
+  // Single-week view (2026-09-30, "single-week leaders" brainstorm item)
+  // -- one real game per player, so there's nothing to scale a
+  // per-team-game qualifier against; skip the team_games lookup and the
+  // qualifier entirely rather than compute a number that wouldn't mean
+  // anything for a one-game sample.
+  const teamGames = week ? null : await teamGamesPlayed(season, gameType);
+
+  // Situational splits (2026-09-30 brainstorm item) reuse the exact
+  // filter fragments buildPlayerWhere() already applies for a single
+  // player's own splits view -- same columns, same "home means this
+  // player's team was the home team" comparison -- just scoped to the
+  // leaderboard's aggregate CTE instead of one player's WHERE clause.
+  // Deliberately NOT applied to the team-games qualifier query or the
+  // latest_team lookup below: the qualifier stays a simple, full-season
+  // reference point regardless of which split is active (keeping the
+  // qualifier math itself simple, even under a split, matches how the
+  // NBA Leaders page keeps its own qualifier unconditional), and a
+  // player's displayed team should still be their real current team,
+  // not whichever team they were on for just their home (or away, or
+  // dome) games.
+  const splitConditions = [];
+  const splitParams = [];
+  let nextParam = 3; // $1 = season, $2 = gameType|week already claimed below
+  if (splits?.home_away === 'home') splitConditions.push('s.team_id = g.home_team_id');
+  if (splits?.home_away === 'away') splitConditions.push('s.team_id = g.away_team_id');
+  if (splits?.game_slot) {
+    splitParams.push(splits.game_slot);
+    splitConditions.push(`g.game_slot = $${nextParam}`);
+    nextParam += 1;
+  }
+  if (splits?.weather_condition) {
+    splitParams.push(splits.weather_condition);
+    splitConditions.push(`g.weather_condition = $${nextParam}`);
+    nextParam += 1;
+  }
+  const splitSql = splitConditions.length ? ` AND ${splitConditions.join(' AND ')}` : '';
 
   // Pull every summable offense column per player in one pass rather
   // than a stat-specific query — cheap at this row count (skill-position
@@ -185,6 +220,40 @@ async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = 
   // later never needs a new SQL shape, only a new LEADERBOARD_STATS
   // entry. Latest team uses the same "most recent game" tiebreak the
   // NBA Leaders page uses for a player who was traded mid-season.
+  // Positional params: $1 season, $2 gameType, $3 week (only when set),
+  // then any split params after -- built as a flat array in that order
+  // rather than interpolating values directly, same parameterized-query
+  // discipline every other query in this file already follows.
+  const baseParams = [season, gameType];
+  let weekClause = '';
+  if (week) {
+    baseParams.push(week);
+    weekClause = ` AND g.week = $${baseParams.length}`;
+  }
+  const params = [...baseParams, ...splitParams];
+  // splitParams' placeholder numbers were pre-computed above assuming
+  // they start right after season+gameType ($3+); when week is also
+  // present it consumes $3, so re-number the split conditions to start
+  // after week's placeholder instead.
+  let splitSqlFinal = splitSql;
+  if (week && splitConditions.length) {
+    const rebuilt = [];
+    // baseParams is [season, gameType, week] here (length 3), so the
+    // first split placeholder needs to be $4, not the $3-based numbering
+    // splitConditions was originally built with above (that numbering
+    // assumed no week param was taking $3).
+    let n = baseParams.length + 1;
+    for (const cond of splitConditions) {
+      if (cond.includes('$')) {
+        rebuilt.push(cond.replace(/\$\d+/, `$${n}`));
+        n += 1;
+      } else {
+        rebuilt.push(cond);
+      }
+    }
+    splitSqlFinal = ` AND ${rebuilt.join(' AND ')}`;
+  }
+
   const { rows } = await query(
     `WITH agg AS (
        SELECT s.player_id, COUNT(*)::int AS gp,
@@ -201,7 +270,7 @@ async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = 
               SUM(s.receiving_tds)::int AS receiving_tds
          FROM player_offense_game_stats s
          JOIN games g ON g.game_id = s.game_id
-        WHERE g.season = $1 AND g.game_type = $2 AND g.status = 'final'
+        WHERE g.season = $1 AND g.game_type = $2 AND g.status = 'final'${weekClause}${splitSqlFinal}
         GROUP BY s.player_id
      ),
      latest_team AS (
@@ -216,11 +285,15 @@ async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = 
        FROM agg
        JOIN players p ON p.player_id = agg.player_id
        JOIN latest_team lt ON lt.player_id = agg.player_id`,
-    [season, gameType]
+    params
   );
 
   const qualifierRate = def.qualifierColumn ? LEADERBOARD_QUALIFIER_PER_TEAM_GAME[def.qualifierColumn] : null;
-  const minQualifier = qualifierRate ? Math.max(1, Math.ceil(teamGames * qualifierRate)) : null;
+  // week is truthy here only when the caller asked for a single-week
+  // view -- teamGames is null in that case (see above), so force no
+  // qualifier rather than let `null * rate` silently evaluate to 0 and
+  // produce a nonsensical "at least 1 attempt" floor.
+  const minQualifier = qualifierRate && !week ? Math.max(1, Math.ceil(teamGames * qualifierRate)) : null;
 
   const withValue = rows.map((r) => {
     let value;
@@ -247,9 +320,14 @@ async function queryLeaderboard({ stat, season, gameType = 'regular', perGame = 
     value: r.value,
   }));
 
-  const notes = minQualifier
-    ? [`Qualifier: at least ${minQualifier} ${def.qualifierColumn.replace('_', ' ')} (${qualifierRate} per team game × ${teamGames} team games played) — the NFL's official minimum, not Chalk That's own rule.`]
-    : [`No qualifier — ${def.label.toLowerCase()} is a counting stat, shown as a season total with no minimum, matching how the NFL's own leaderboards present it.`];
+  let notes;
+  if (minQualifier) {
+    notes = [`Qualifier: at least ${minQualifier} ${def.qualifierColumn.replace('_', ' ')} (${qualifierRate} per team game × ${teamGames} team games played) — the NFL's official minimum, not Chalk That's own rule.`];
+  } else if (week) {
+    notes = [`Single-week view (Week ${week}) — no qualifier; one real game per player.`];
+  } else {
+    notes = [`No qualifier — ${def.label.toLowerCase()} is a counting stat, shown as a season total with no minimum, matching how the NFL's own leaderboards present it.`];
+  }
 
   return {
     data,
@@ -473,10 +551,14 @@ async function getFreshness(jobType) {
   return { synced_at: rows[0]?.finished_at || null };
 }
 
-async function runStatsQuery({ entity_type, entity_id, scope, season, splits, stat, gameType, perGame, limit }) {
+async function runStatsQuery({ entity_type, entity_id, scope, season, splits, stat, gameType, perGame, limit, week }) {
+  // week/splits (2026-09-30 brainstorm: single-week leaders + situational
+  // splits) only apply to the leaderboard branch -- queryPlayer/queryTeam
+  // already take their own `splits` shape via their own scope handling,
+  // and neither of those has a concept of a single-week leaderboard view.
   const result =
     scope === 'leaderboard'
-      ? await queryLeaderboard({ stat, season, gameType, perGame, limit })
+      ? await queryLeaderboard({ stat, season, gameType, perGame, limit, week, splits })
       : entity_type === 'player'
       ? await queryPlayer({ entity_id, scope, season, splits })
       : await queryTeam({ entity_id, scope, season, splits });
