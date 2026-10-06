@@ -913,6 +913,31 @@ drafting the iOS app is the last thing in this list, not the first.
       (shipped this session, see League Leaders above) under the hood
       rather than a new query shape.
 
+14. **Games list "ladder" ordering — not started (added 2026-10-06).**
+    As games finish, they cycle down the list like a ladder: e.g. once
+    the 10am games go final they drop to the bottom, pushing games that
+    haven't started yet toward the top, so what's live or upcoming is
+    always what the viewer sees first. Today the schedule is purely
+    chronological: `backend/routes/games.js` returns games
+    `ORDER BY g.game_datetime ASC`, and `BoardPage.jsx` only groups them
+    by local calendar date (sorted by date key) without reordering by
+    status, so a finished early game keeps its slot at the top.
+    Likely a frontend-only change (re-sort each list by status bucket,
+    then kickoff time) over the `status` field both `BoardPage.jsx` and
+    `GamesPage.jsx` already read, since both already poll live scores
+    while any game is `in_progress`.
+    **Rules decided 2026-10-06:** applies to the Board page. Live
+    (`in_progress`) games stay exactly where they are; delayed games
+    stay where they are too; once a game is final it moves down. Applies
+    to both apps (Chalk That NFL and Chalk That Hardwood) -- tracked here
+    for NFL, and logged separately in the Hardwood chat. The
+    reordering happens across the whole Board list, not within each
+    date group (so finished games from earlier days also sink below
+    upcoming ones; note this means the current by-date grouping on
+    `BoardPage.jsx` will need rethinking when it is built). No open
+    questions remain. (`GamesPage.jsx` was not named, so it is out of
+    scope unless that changes.)
+
 **Scrapped, not backlogged (2026-09-17): self-serve signup + email
 verification.** Checked instead of assumed before dropping it: the
 `users` table has 8 rows today, but 7 are seed/test accounts with no
